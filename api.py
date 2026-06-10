@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from database import Session, Match
+from ai import generate_match_briefing
 
 app = FastAPI()
 
@@ -45,3 +46,30 @@ def get_today_matches():
         }
         for m in matches
     ]
+
+@app.get("/matches/{match_id}/briefing")
+def get_match_briefing(match_id: int):
+    session = Session()
+    match = session.query(Match).filter_by(match_id=match_id).first()
+    session.close()
+
+    if not match:
+        return {"error": "Match not found"}
+    
+    briefing = generate_match_briefing(
+        home_team = match.home_team,
+        away_team = match.away_team,
+        match_date = match.match_date,
+        stage = match.stage,
+        group = match.group_name
+    )
+
+    return {
+        "match_id": match_id,
+        "home_team": match.home_team,
+        "away_team": match.away_team,
+        "date": match.match_date,
+        "stage": match.stage,
+        "group": match.group_name,
+        "briefing": briefing
+    }
