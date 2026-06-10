@@ -1,12 +1,14 @@
 import requests
 from database import Session, Match
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+
+API_KEY = os.getenv("FOOTBALL_API_KEY")
 
 url = "https://api.football-data.org/v4/competitions/WC/matches"
-
-headers = {
-    "X-Auth-Token": "2a750a0f112949a58de3bc0ad3102118"
-}
-
+headers = {"X-Auth-Token": API_KEY}
 
 response = requests.get(url, headers=headers)
 data = response.json()
