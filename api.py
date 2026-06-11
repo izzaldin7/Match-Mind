@@ -81,3 +81,34 @@ def get_match_briefing(match_id: int):
         "group": match.group_name,
         "briefing": briefing
     }
+
+@app.get("/matches/{match_id}/report")
+def get_post_match_report(match_id: int):
+    session = Session()
+    match = session.query(Match).filter_by(match_id=match_id).first()
+    session.close()
+
+    if not match:
+        return {"error": "Match not found"}
+    if match.status != "FINISHED":
+        return {"error": f"Match is not finished yet. Current status: {match.status}"}
+    
+    report = get_post_match_report(
+        home_team = match.home_team,
+        away_team = match.away_team,
+        home_score = match.home_score,
+        away_score = match.away_score,
+        stage = match.stage,
+        group = match.group_name
+    )
+
+    return {
+        "match_id": match_id,
+        "home_team": match.home_team,
+        "away_team": match.away_team,
+        "home_score": match.home_score,
+        "away_score": match.away_score,
+        "stage": match.stage,
+        "group": match.group_name,
+        "report": report
+    }
