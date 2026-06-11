@@ -1,8 +1,16 @@
 from fastapi import FastAPI
+from contextlib import asynccontextmanager
 from database import Session, Match
 from ai import generate_match_briefing
+from scheduler import start_scheduler
 
-app = FastAPI()
+@asynccontextmanager
+async def lifespan(app):
+    scheduler = start_scheduler()
+    yield
+    scheduler.shutdown()
+
+app = FastAPI(lifespan=lifespan)
 
 @app.get("/")
 def root():

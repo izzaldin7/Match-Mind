@@ -35,5 +35,3 @@ session.commit()
 session.close()
 print("Fixtures saved to database!")
 
-
-        
