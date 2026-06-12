@@ -1,4 +1,15 @@
+import requests
+from bs4 import BeautifulSoup
 from database import Session, Match
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+
+FOOTBALL_API_KEY = os.getenv("FOOTBALL_API_KEY")
+FOOTBALL_HEADERS = {"X-Auth-Token": FOOTBALL_API_KEY}
+WIKI_HEADERS = {"User-Agent": "MatchMind/1.0 (portfolio project)"}
+
 
 def get_group_standings(group_name):
     session = Session()
@@ -28,9 +39,9 @@ def get_group_standings(group_name):
                     "won": 0,
                     "drawn": 0,
                     "lost": 0,
-                    "goals for": 0,
-                    "goals against": 0,
-                    "goal difference": 0,
+                    "gf": 0,
+                    "ga": 0,
+                    "gd": 0,
                     "points": 0
                 }
 
@@ -67,7 +78,6 @@ def get_group_standings(group_name):
         key = lambda x: (x["points"], x["gd"], x["gf"]),
         reverse = True
     )
-
     return sorted_standings
 
 def format_standings_for_prompt(group_name):
@@ -103,5 +113,120 @@ def format_standings_for_prompt(group_name):
         )
 
     return "\n".join(lines)
+
+# ---- football-data.org match events ---------------------
+
+def fetch_match_events(match_id):
+    """
+    Fetches real match data from football-data.org individual match endpoint.
+    Returns goals, cards, lineups and stats as a formatted string for AI prompts.
+    """
+    try:
+        url = f"https://api.football-data.org/v4/matches/{match_id}"
+        response = requests.get(url, headers = FOOTBALL_HEADERS, timeout=10)
+
+        if response.status_code != 200:
+            print(f"Match events fetch failed: {response.status_code}")
+            return None
+        
+        data = response.json()
+        lines = []
+
+        #Goals
+        goals = data.get("goals", [])
+        if goals:
+            lines.append("Goals:")
+            for g in goals:
+                scorer = g.get("scorer", {}).get("name", "Unknown")
+                team = g.get("team", {}).get("name", "Unknown")
+                minute = g.get("minute", "?")
+                own_goal = " (OG)" if g.get("type") == "OWN" else ""
+                penalty = " (Pen)" if g.get("type") == "PENALTY" else ""
+                lines.append(f" {minute}' {scorer}{own_goal}{penalty} ({team})")
+
+        #Cards
+        bookings = data.get("bookings", [])
+        if bookings:
+            lines.append("\nCards:")
+            for b in bookings:
+                player = b.get("player", {}).get("name", "Unknown")
+                team = b.get("team", {}).get("name", "Unknown")
+                minute = b.get("minute", "?")
+                card = b.get("card", "YELLOW_CARD")
+                card_str = "Red Card" if "RED" in card else "Yellow Card"
+                lines.append(f" {minute}' {card_str} - {player} ({team})")
+
+        return "\n".join(lines) if lines else None
+    
+    except Exception as e:
+        print(f"Match events fetch error: {e}")
+        return None
+    
+# ---- Wikipedia group context for briefings ----------------------
+
+def _group_letter(group_name):
+    return group_name.replace("GROUP_", "").strip()
+
+def scrape_group_context(group_name):
+    """
+    Scrapes Wikipedia's group page for historical h2h context.
+    Used to enrich match briefings.
+    """
+    letter = _group_letter(group_name)
+    url = f"https://en.wikipedia.org/wiki/2026_FIFA_World_Cup_Group_{letter}"
+
+    try:
+        response = requests.get(url, headers=WIKI_HEADERS, timeout=10)
+        soup = BeautifulSoup(response.text, "html.parser")
+
+        content_div = soup.find("div", {"id": "mw-content-text"})
+        if not content_div:
+            return None
+        
+        paragraphs = content_div.find_all("p")
+        text_blocks = []
+
+        for p in paragraphs:
+            text = p.get_text(strip=True)
+            if len(text) > 60:
+                text_blocks.append(text)
+
+        return "\n\n".join(text_blocks[:6]) if text_blocks else None
+    
+    except Exception as e:
+        print(f"Wikipedia group scrape failed: {e}")
+        return None
+    
+def scrape_motm(home_team, away_team):
+    home_wiki = home_team.replace(" ", "_")
+    away_wiki = away_team.replace(" ", "_")
+    url = f"https://en.wikipedia.org/wiki/{home_wiki}_v_{away_wiki}_(2026_FIFA_World_Cup)"
+
+    try:
+        response = requests.get(url, headers=WIKI_HEADERS, timeout=10)
+
+        if response.status_code != 200:
+            return None
+        
+        soup = BeautifulSoup(response.text, "html.parser")
+
+        infobox = soup.find("table", {"class": "infobox"})
+        if not infobox:
+            return None
+        
+        rows = infobox.find_all("tr")
+        for row in rows:
+            header = row.find("th")
+            data = row.find("td")
+            if header and data:
+                header_text = header.get_text(strip=True).lower()
+                if "man of the match" in header_text or "motm" in header_text or "player of the match" in header_text:
+                    return data.get_text(strip=True)
+
+        return None
+
+    except Exception as e:
+        print(f"Wikipedia MOTM scrape failed: {e}")
+        return None 
 
         
