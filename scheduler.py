@@ -14,11 +14,13 @@ def refresh_match_data():
     print("Refreshing match data from football-data.org....")
     response = requests.get(url, headers=headers)
     data = response.json()
+    print(f"API returned {len(data['matches'])}matches")
 
     session = Session()
     for match in data['matches']:
         existing = session.query(Match).filter_by(match_id=match['id']).first()
         if existing:
+            print(f"Updating {match['homeTeam']['name']} vs {match['awayTeam']['name']}: {match['status']}")
             existing.status = match['status']
             existing.home_score = match['score']['fullTime']['home']
             existing.away_score = match['score']['fullTime']['away']
@@ -44,5 +46,6 @@ def start_scheduler():
     scheduler = BackgroundScheduler()
     scheduler.add_job(refresh_match_data, 'interval', minutes=5)
     scheduler.start()
+    refresh_match_data()
     print("Scheduler started - refreshing every 5 minutes.")
     return scheduler

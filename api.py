@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
 from database import Session, Match
-from ai import generate_match_briefing
+from ai import generate_match_briefing, generate_post_match_report
 from scheduler import start_scheduler
 
 @asynccontextmanager
@@ -93,7 +93,7 @@ def get_post_match_report(match_id: int):
     if match.status != "FINISHED":
         return {"error": f"Match is not finished yet. Current status: {match.status}"}
     
-    report = get_post_match_report(
+    report = generate_post_match_report(
         home_team = match.home_team,
         away_team = match.away_team,
         home_score = match.home_score,
