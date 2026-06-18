@@ -2,6 +2,7 @@ import requests
 from database import Session, Match
 from dotenv import load_dotenv
 import os
+import re
 
 load_dotenv()
 
@@ -27,7 +28,6 @@ TEAM_IDS = {
     "Switzerland": 13549, "Canada": 4705963
 }
 
-# Maps your DB's naming (from football-data.org) to Highlightly's naming
 TEAM_NAME_ALIASES = {
     "Czechia": "Czech Republic",
     "Cape Verde Islands": "Cape Verde",
@@ -37,16 +37,14 @@ TEAM_NAME_ALIASES = {
 
 
 def get_highlightly_team_id(db_team_name):
-    """
-    Resolves a team name (as stored in your DB) to its Highlightly team ID,
-    accounting for naming differences between data sources.
-    """
     highlightly_name = TEAM_NAME_ALIASES.get(db_team_name, db_team_name)
     return TEAM_IDS.get(highlightly_name)
 
 
 def _hl_get(endpoint, params=None):
-    """Internal helper for GET requests to Highlightly, with basic error handling."""
+    if not HIGHLIGHTLY_API_KEY:
+        print("Missing HIGHLIGHTLY_API_KEY in environment.")
+        return None
     try:
         url = f"{HIGHLIGHTLY_BASE}/{endpoint}"
         response = requests.get(url, headers=HIGHLIGHTLY_HEADERS, params=params, timeout=10)
@@ -59,13 +57,73 @@ def _hl_get(endpoint, params=None):
         return None
 
 
-# ── Standings from DB (unchanged, still reliable) ──────────────────
+def _as_list(payload):
+    if isinstance(payload, list):
+        return payload
+    if isinstance(payload, dict):
+        data = payload.get("data")
+        if isinstance(data, list):
+            return data
+    return []
+
+
+def _first_present(*values):
+    for value in values:
+        if value not in (None, "", [], {}):
+            return value
+    return None
+
+
+def fetch_world_cup_matches(limit=100):
+    data = _hl_get("matches", {
+        "leagueId": WORLD_CUP_LEAGUE_ID,
+        "season": WORLD_CUP_SEASON,
+        "limit": limit
+    })
+    return _as_list(data)
+
+
+def _team_name(match, side):
+    team = match.get(f"{side}Team") or match.get(side) or {}
+    if isinstance(team, dict):
+        return team.get("name")
+    return team
+
+
+def _match_status(match):
+    state = match.get("state") or {}
+    return match.get("status") or state.get("description") or state.get("short") or "SCHEDULED"
+
+
+def _match_date(match):
+    raw_date = match.get("date") or match.get("utcDate") or match.get("startTime")
+    return raw_date[:10] if raw_date else None
+
+
+def _score_pair(match):
+    score = match.get("score")
+    if isinstance(score, dict):
+        full_time = score.get("fullTime") or score.get("current") or score
+        if isinstance(full_time, dict):
+            return full_time.get("home"), full_time.get("away")
+
+    state_score = (match.get("state") or {}).get("score") or {}
+    current = state_score.get("current")
+    if isinstance(current, str):
+        numbers = [int(n) for n in re.findall(r"\d+", current)]
+        if len(numbers) >= 2:
+            return numbers[0], numbers[1]
+
+    return None, None
+
+
+# ── Standings from DB ──────────────────────────────────────────────
 
 def get_group_standings(group_name, exclude_match_id=None):
     session = Session()
-    query = session.query(Match).filter_by(
-        group_name=group_name,
-        status="FINISHED"
+    query = session.query(Match).filter(
+        Match.group_name == group_name,
+        Match.status.in_(["FINISHED", "Finished"])
     )
     if exclude_match_id:
         query = query.filter(Match.match_id != exclude_match_id)
@@ -82,6 +140,8 @@ def get_group_standings(group_name, exclude_match_id=None):
         away = match.away_team
         hg = match.home_score
         ag = match.away_score
+        if hg is None or ag is None:
+            continue
 
         for team in [home, away]:
             if team not in standings:
@@ -155,28 +215,20 @@ def format_standings_for_prompt(group_name, exclude_match_id=None):
     return "\n".join(lines)
 
 
-# ── Highlightly: match lookup ────────────────────────────────────
+# ── Highlightly: match lookup ──────────────────────────────────────
 
 def find_highlightly_match_id(home_team, away_team, match_date):
-    """
-    Finds the Highlightly match ID for a given fixture by team names and date.
-    match_date should be 'YYYY-MM-DD' as stored in your DB.
-    """
-    data = _hl_get("matches", {
-        "leagueId": WORLD_CUP_LEAGUE_ID,
-        "season": WORLD_CUP_SEASON,
-        "limit": 100
-    })
-    if not data:
+    matches = fetch_world_cup_matches()
+    if not matches:
         return None
 
     home_alias = TEAM_NAME_ALIASES.get(home_team, home_team)
     away_alias = TEAM_NAME_ALIASES.get(away_team, away_team)
 
-    for m in data.get("data", []):
-        m_home = m["homeTeam"]["name"]
-        m_away = m["awayTeam"]["name"]
-        m_date = m["date"][:10]
+    for m in matches:
+        m_home = _team_name(m, "home")
+        m_away = _team_name(m, "away")
+        m_date = _match_date(m)
 
         if m_home == home_alias and m_away == away_alias and m_date == match_date:
             return m["id"]
@@ -184,59 +236,96 @@ def find_highlightly_match_id(home_team, away_team, match_date):
     return None
 
 
-# ── Highlightly: full match detail (events, stats, referee, venue) ─
+# ── Highlightly: full match detail ────────────────────────────────
 
 def fetch_highlightly_match(highlightly_match_id):
-    """
-    Fetches full match detail from Highlightly: venue, referee, events
-    (goals, cards, substitutions), and team statistics.
-    """
     data = _hl_get(f"matches/{highlightly_match_id}")
-    if not data or not isinstance(data, list) or len(data) == 0:
-        return None
-    return data[0]
+    if isinstance(data, list) and len(data) > 0:
+        return data[0]
+    if isinstance(data, dict):
+        return data
+    return None
+
+
+# ── Format helpers ─────────────────────────────────────────────────
+
+def _event_minute(event):
+    minute = _first_present(
+        event.get("time"), event.get("minute"),
+        event.get("minutes"), event.get("elapsed")
+    )
+    extra = _first_present(event.get("extraTime"), event.get("addedTime"))
+    if minute is None:
+        return "?"
+    if extra:
+        return f"{minute}+{extra}'"
+    return f"{minute}'"
+
+
+def _event_player(event, *keys):
+    for key in keys:
+        value = event.get(key)
+        if isinstance(value, dict):
+            return value.get("name")
+        if value:
+            return value
+    return None
 
 
 def format_match_events(match_detail):
-    """
-    Formats goals, cards, and substitutions from a Highlightly match
-    detail object into a clean string for AI prompts.
-    """
-    events = match_detail.get("events", [])
+    events = _as_list(match_detail.get("events", []))
     if not events:
         return None
 
     lines = []
-    goals = [e for e in events if e["type"] in ("Goal", "Penalty", "Own Goal")]
-    cards = [e for e in events if e["type"] in ("Yellow Card", "Red Card")]
-    subs = [e for e in events if e["type"] == "Substitution"]
+    goals = [e for e in events if str(e.get("type", "")).lower() in ("goal", "penalty", "own goal")]
+    cards = [e for e in events if "card" in str(e.get("type", "")).lower()]
+    subs = [e for e in events if str(e.get("type", "")).lower() == "substitution"]
 
     if goals:
         lines.append("Goals:")
         for g in goals:
-            assist_str = f" (assist: {g['assist']})" if g.get("assist") else ""
-            lines.append(f"  {g['time']}' {g['player']} ({g['team']['name']}){assist_str} [{g['type']}]")
+            team = g.get("team") or {}
+            player = _event_player(g, "player", "scorer", "playerName")
+            assist = _event_player(g, "assist", "assistedBy", "assistPlayer")
+            assist_str = f" (assist: {assist})" if assist else ""
+            lines.append(f"  {_event_minute(g)} {player} ({team.get('name')}){assist_str} [{g.get('type')}]")
 
     if cards:
         lines.append("\nCards:")
         for c in cards:
-            lines.append(f"  {c['time']}' {c['type']} - {c['player']} ({c['team']['name']})")
+            team = c.get("team") or {}
+            player = _event_player(c, "player", "playerName")
+            lines.append(f"  {_event_minute(c)} {c.get('type')} - {player} ({team.get('name')})")
 
     if subs:
         lines.append("\nSubstitutions:")
         for s in subs:
-            lines.append(f"  {s['time']}' {s['player']} replaces {s['substituted']} ({s['team']['name']})")
+            team = s.get("team") or {}
+            player_on = _event_player(s, "player", "playerIn", "in")
+            player_off = _event_player(s, "substituted", "playerOut", "out")
+            if player_off:
+                lines.append(f"  {_event_minute(s)} {player_on} replaces {player_off} ({team.get('name')})")
+            else:
+                lines.append(f"  {_event_minute(s)} {player_on} ({team.get('name')})")
 
     return "\n".join(lines) if lines else None
 
 
+def format_period_scores(match_detail):
+    state_score = (match_detail.get("state") or {}).get("score") or {}
+    current = state_score.get("current")
+
+    sections = []
+    if current:
+        sections.append(f"Full-time score: {current}")
+
+    return "\n".join(sections) if sections else None
+
+
 def format_match_statistics(match_detail):
-    """
-    Formats team statistics (possession, shots, xG, etc.) from a Highlightly
-    match detail object into a clean string for AI prompts.
-    """
-    stats = match_detail.get("statistics", [])
-    if not stats or len(stats) < 2:
+    stats = _as_list(match_detail.get("statistics", []))
+    if not stats:
         return None
 
     key_stats = [
@@ -247,25 +336,64 @@ def format_match_statistics(match_detail):
 
     lines = ["Match Statistics:"]
     for team_stats in stats:
-        team_name = team_stats["team"]["name"]
-        values = {s["displayName"]: s["value"] for s in team_stats.get("statistics", [])}
+        team_name = (team_stats.get("team") or {}).get("name", "Unknown")
+        stat_rows = _as_list(team_stats.get("statistics", []))
+        values = {}
+        for row in stat_rows:
+            name = _first_present(row.get("displayName"), row.get("name"))
+            value = _first_present(row.get("value"), row.get("displayValue"))
+            if name is not None and value is not None:
+                values[name] = value
         row = []
         for stat_name in key_stats:
             if stat_name in values:
                 val = values[stat_name]
-                if stat_name == "Possession":
+                if stat_name == "Possession" and isinstance(val, float):
                     val = f"{round(val * 100)}%"
                 row.append(f"{stat_name}: {val}")
-        lines.append(f"  {team_name} — " + ", ".join(row))
+        if row:
+            lines.append(f"  {team_name} - " + ", ".join(row))
 
-    return "\n".join(lines)
+    return "\n".join(lines) if len(lines) > 1 else None
 
+
+def format_lineups(match_detail):
+    lineups = _as_list(match_detail.get("lineups", []))
+    if not lineups:
+        return None
+
+    lines = ["Lineups:"]
+    for lineup in lineups:
+        team_name = (lineup.get("team") or {}).get("name", "Unknown")
+        formation = lineup.get("formation")
+        starters = []
+        for player in _as_list(_first_present(lineup.get("startXI"), lineup.get("starters"), lineup.get("players"))):
+            if isinstance(player, dict):
+                name = _first_present(player.get("name"), (player.get("player") or {}).get("name"))
+                if name:
+                    starters.append(name)
+        substitutes = []
+        for player in _as_list(_first_present(lineup.get("substitutes"), lineup.get("bench"))):
+            if isinstance(player, dict):
+                name = _first_present(player.get("name"), (player.get("player") or {}).get("name"))
+                if name:
+                    substitutes.append(name)
+
+        header = f"  {team_name}"
+        if formation:
+            header += f" ({formation})"
+        lines.append(header)
+        if starters:
+            lines.append(f"    Starters: {', '.join(starters)}")
+        if substitutes:
+            lines.append(f"    Substitutes: {', '.join(substitutes)}")
+
+    return "\n".join(lines) if len(lines) > 1 else None
+
+
+# ── Main context builders ──────────────────────────────────────────
 
 def get_match_context(home_team, away_team, match_date, highlightly_match_id=None):
-    """
-    Builds the full real-data context string for post-match reports:
-    venue, referee, goals/cards/subs, and team statistics, all from Highlightly.
-    """
     if not highlightly_match_id:
         highlightly_match_id = find_highlightly_match_id(home_team, away_team, match_date)
 
@@ -276,7 +404,7 @@ def get_match_context(home_team, away_team, match_date, highlightly_match_id=Non
     if not match_detail:
         return None
 
-    lines = []
+    lines = [f"Highlightly match ID: {highlightly_match_id}"]
 
     venue = match_detail.get("venue")
     if venue:
@@ -286,6 +414,10 @@ def get_match_context(home_team, away_team, match_date, highlightly_match_id=Non
     if referee:
         lines.append(f"Referee: {referee.get('name')} ({referee.get('nationality')})")
 
+    score_str = format_period_scores(match_detail)
+    if score_str:
+        lines.append(score_str)
+
     events_str = format_match_events(match_detail)
     if events_str:
         lines.append(f"\n{events_str}")
@@ -294,34 +426,30 @@ def get_match_context(home_team, away_team, match_date, highlightly_match_id=Non
     if stats_str:
         lines.append(f"\n{stats_str}")
 
+    lineups_str = format_lineups(match_detail)
+    if lineups_str:
+        lines.append(f"\n{lineups_str}")
+
     return "\n".join(lines) if lines else None
 
 
-# ── Highlightly: head-to-head + team form for briefings ────────────
-
 def get_head_to_head(home_team, away_team):
-    """
-    Fetches historical head-to-head matches between two teams from Highlightly.
-    """
     home_id = get_highlightly_team_id(home_team)
     away_id = get_highlightly_team_id(away_team)
 
     if not home_id or not away_id:
         return None
 
-    data = _hl_get("head-2-head", {"teamIdOne": home_id, "teamIdTwo": away_id})
-    if not data:
-        return None
-
-    if not data:
+    matches = _as_list(_hl_get("head-2-head", {"teamIdOne": home_id, "teamIdTwo": away_id}))
+    if not matches:
         return None
 
     lines = [f"Head-to-head history between {home_team} and {away_team}:"]
-    for m in data[:5]:
-        m_home = m["homeTeam"]["name"]
-        m_away = m["awayTeam"]["name"]
-        score = m.get("state", {}).get("score", {}).get("current", "N/A")
-        date = m["date"][:10]
+    for m in matches[:5]:
+        m_home = _team_name(m, "home")
+        m_away = _team_name(m, "away")
+        score = (m.get("state") or {}).get("score", {}).get("current", "N/A")
+        date = _match_date(m) or "Unknown date"
         round_name = m.get("round", "")
         lines.append(f"  {date} ({round_name}): {m_home} {score} {m_away}")
 
@@ -329,28 +457,25 @@ def get_head_to_head(home_team, away_team):
 
 
 def get_team_tournament_form(team_name, exclude_match_id=None):
-    """
-    Fetches this team's matches so far in the 2026 World Cup from Highlightly,
-    and summarizes their goal involvements (scorers and assisters) across
-    those matches. Used to give briefings real prior-form context.
-    """
     team_id = get_highlightly_team_id(team_name)
     if not team_id:
         return None
 
-    data = _hl_get("matches", {
-        "leagueId": WORLD_CUP_LEAGUE_ID,
-        "season": WORLD_CUP_SEASON,
-        "teamId": team_id,
-        "limit": 20
-    })
-    if not data:
+    all_matches = fetch_world_cup_matches()
+    if not all_matches:
         return None
 
+    team_alias = TEAM_NAME_ALIASES.get(team_name, team_name)
     finished_matches = [
-        m for m in data.get("data", [])
-        if m.get("state", {}).get("description") == "Finished"
-        and m["id"] != exclude_match_id
+        m for m in all_matches
+        if _match_status(m) in ("FINISHED", "Finished")
+        and m.get("id") != exclude_match_id
+        and (
+            _team_name(m, "home") == team_alias or
+            _team_name(m, "away") == team_alias or
+            _team_name(m, "home") == team_name or
+            _team_name(m, "away") == team_name
+        )
     ]
 
     if not finished_matches:
@@ -362,9 +487,10 @@ def get_team_tournament_form(team_name, exclude_match_id=None):
         if not detail:
             continue
         for e in detail.get("events", []):
-            if e["team"]["name"] != team_name and TEAM_NAME_ALIASES.get(team_name) != e["team"]["name"]:
+            event_team_name = (e.get("team") or {}).get("name")
+            if event_team_name not in (team_name, team_alias):
                 continue
-            if e["type"] in ("Goal", "Penalty"):
+            if e.get("type") in ("Goal", "Penalty") and e.get("player"):
                 scorers.setdefault(e["player"], {"goals": 0, "assists": 0})
                 scorers[e["player"]]["goals"] += 1
                 if e.get("assist"):

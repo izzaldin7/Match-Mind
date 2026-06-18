@@ -6,8 +6,10 @@ import os
 
 load_dotenv()
 
-HIGHLIGHTLY_API_KEY = os.getenv("HIGHLIGHTLY_API_KEY")
-HIGHLIGHTLY_HEADERS = {"x-rapidapi-key": HIGHLIGHTLY_API_KEY}
+API_KEY = os.getenv("FOOTBALL_API_KEY")
+url = "https://api.football-data.org/v4/competitions/WC/matches"
+headers = {"X-Auth-Token": API_KEY}
+
 
 def refresh_match_data():
     print("Refreshing match data from football-data.org....")
@@ -59,11 +61,9 @@ def start_scheduler():
     scheduler = BackgroundScheduler()
     scheduler.add_job(refresh_match_data, 'interval', minutes=5)
     scheduler.start()
-
     try:
         refresh_match_data()
     except Exception as e:
         print(f"Initial refresh failed, will retry on next scheduled interval: {e}")
-
     print("Scheduler started - refreshing every 5 minutes.")
     return scheduler

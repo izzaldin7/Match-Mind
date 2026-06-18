@@ -10,42 +10,114 @@ from utils import (
 
 load_dotenv()
 
-client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+client = None
 
 
-def generate_match_briefing(home_team, away_team, match_date, stage, group=None, match_id=None):
-    group_info = f"Group {group}" if group else stage
+def get_groq_client():
+    global client
+    if client:
+        return client
 
-    standings_context = ""
-    wiki_context = ""
-    scorers_context = ""
+    api_key = os.getenv("GROQ_API_KEY")
+    if not api_key:
+        raise RuntimeError("Missing GROQ_API_KEY in environment.")
+
+    client = Groq(api_key=api_key)
+    return client
+
+
+def build_match_briefing_context(home_team, away_team, match_date, stage, group=None, match_id=None):
+    group_info = group.replace("GROUP_", "Group ") if group else stage
+    context = {
+        "fixture": f"{home_team} vs {away_team}",
+        "date": match_date,
+        "stage": group_info,
+        "standings": None,
+        "goal_involvements": None,
+        "head_to_head": None
+    }
 
     if group:
-        standings_context = format_standings_for_prompt(group, exclude_match_id=match_id)
+        context["standings"] = format_standings_for_prompt(group, exclude_match_id=match_id)
 
     home_form = get_team_tournament_form(home_team, exclude_match_id=match_id)
     away_form = get_team_tournament_form(away_team, exclude_match_id=match_id)
-    scorer_blocks = [s for s in [home_form, away_form] if s]
+    scorer_blocks = [block for block in (home_form, away_form) if block]
     if scorer_blocks:
-        scorers_context = "\n\n".join(scorer_blocks)
+        context["goal_involvements"] = "\n\n".join(scorer_blocks)
 
-    h2h = get_head_to_head(home_team, away_team)
-    if h2h:
-        wiki_context = h2h
+    context["head_to_head"] = get_head_to_head(home_team, away_team)
+    return context
+
+
+def build_post_match_context(home_team, away_team, home_score, away_score, stage, group=None, match_id=None, match_date=None):
+    group_info = group.replace("GROUP_", "Group ") if group else stage
+
+    if home_score is None or away_score is None:
+        outcome = "the final score is unavailable"
+    elif home_score > away_score:
+        outcome = f"{home_team} won"
+    elif away_score > home_score:
+        outcome = f"{away_team} won"
+    else:
+        outcome = "the match ended in a draw"
+
+    result = f"{home_team} {home_score}-{away_score} {away_team}"
+
+    context = {
+        "result": result,
+        "stage": group_info,
+        "outcome": outcome,
+        "standings": None,
+        "match_data": None
+    }
+
+    if group:
+        context["standings"] = format_standings_for_prompt(group)
+
+    if match_date:
+        context["match_data"] = get_match_context(
+            home_team,
+            away_team,
+            match_date=match_date,
+            highlightly_match_id=None
+        )
+
+    return context
+
+
+def _context_block(title, value):
+    if value:
+        return f"{title}:\n{value}"
+    return f"{title}: Not available."
+
+
+def generate_match_briefing(home_team, away_team, match_date, stage, group=None, match_id=None, context=None):
+    if context is None:
+        context = build_match_briefing_context(
+            home_team,
+            away_team,
+            match_date,
+            stage,
+            group=group,
+            match_id=match_id
+        )
 
     prompt = f"""
     You are MatchMind, a football analyst covering the 2026 FIFA World Cup.
     Write a pre-match briefing for the following fixture:
 
-    {home_team} vs {away_team}
-    Date: {match_date}
-    Stage: {group_info}
+    Fixture: {context["fixture"]}
+    Date: {context["date"]}
+    Stage: {context["stage"]}
 
-    {standings_context}
+    AVAILABLE DATA
 
-    {scorers_context}
+    {_context_block("Current standings", context["standings"])}
 
-    {wiki_context}
+    {_context_block("Tournament goal involvements", context["goal_involvements"])}
+
+    {_context_block("Head-to-head history", context["head_to_head"])}
 
     This is the World Cup — write with a sense of occasion and genuine weight.
     Be engaging and vivid where the moment calls for it, but always grounded and
@@ -67,6 +139,11 @@ def generate_match_briefing(home_team, away_team, match_date, stage, group=None,
     - A considered prediction with a clear reason behind it
 
     ABSOLUTE RULES — these cannot be broken under any circumstances:
+    - Your briefing must be driven by the AVAILABLE DATA above. If standings,
+      goal involvements, or head-to-head history are available, use them directly
+      and specifically in the briefing.
+    - If a category says "Not available", do not invent it and do not write as if
+      you know it. Briefly say that reliable data is not available where relevant.
     - Only mention player names that explicitly appear in the data provided above
       (goal involvements section or head-to-head context). Do not recall, assume,
       or invent any player names from your training data.
@@ -80,71 +157,67 @@ def generate_match_briefing(home_team, away_team, match_date, stage, group=None,
     - Keep it under 220 words.
     """
 
-    response = client.chat.completions.create(
+    response = get_groq_client().chat.completions.create(
         model="llama-3.3-70b-versatile",
         messages=[{"role": "user", "content": prompt}]
     )
     return response.choices[0].message.content
 
 
-def generate_post_match_report(home_team, away_team, home_score, away_score, stage, group=None, match_id=None, match_date=None):
-    group_info = f"Group {group}" if group else stage
-    result = f"{home_team} {home_score}-{away_score} {away_team}"
-
-    if home_score > away_score:
-        outcome = f"{home_team} won"
-    elif away_score > home_score:
-        outcome = f"{away_team} won"
-    else:
-        outcome = "the match ended in a draw"
-
-    standings_context = ""
-    match_context = ""
-    motm_context = ""
-
-    if group:
-        standings_context = format_standings_for_prompt(group, exclude_match_id=match_id)
-
-    if match_id:
-        raw_context = get_match_context(home_team, away_team, match_date=match_date, highlightly_match_id=match_id)
-        if raw_context:
-            match_context = f"Match data:\n{raw_context}"
+def generate_post_match_report(home_team, away_team, home_score, away_score, stage, group=None, match_id=None, match_date=None, context=None):
+    if context is None:
+        context = build_post_match_context(
+            home_team,
+            away_team,
+            home_score,
+            away_score,
+            stage,
+            group=group,
+            match_id=match_id,
+            match_date=match_date
+        )
 
     prompt = f"""
     You are MatchMind, a football analyst covering the 2026 FIFA World Cup.
     Write a post-match report for the following result:
 
-    {result}
-    Stage: {group_info}
-    Outcome: {outcome}
+    Result: {context["result"]}
+    Stage: {context["stage"]}
+    Outcome: {context["outcome"]}
 
-    {standings_context}
+    AVAILABLE DATA
 
-    {match_context}
+    {_context_block("Current standings", context["standings"])}
 
-    {motm_context}
+    {_context_block("Match data", context["match_data"])}
 
     Write this like a match report from a quality sports publication — analytical,
     alive, with a sense of occasion. Be vivid where the moment earns it, precise
     where the data demands it. Never hollow, never over the top.
 
     Structure your report as follows:
-    - A headline and opening paragraph that captures the result and its significance
-    - A match narrative built from the goals, their minutes, and any other events
-      (cards, substitutions) listed in the match data above. Use the timeline to
-      show the shape of the game — when it turned, when it was sealed.
-    - If match statistics (possession, shots, big chances, etc.) are present in the
-      match data above, use them to support your description of how the game was
-      controlled — but only state numbers that appear explicitly in that data.
-    - If goal involvements are listed for either team above, you may reference
-      players responsible for that team's attacking threat this tournament.
-    - The referee's name, if provided, can be mentioned briefly for color — purely
-      as a factual note, without any characterization of how the match was
-      conducted.
-    - What this result means for both teams in the group standings going forward,
+    - A headline and strong opening paragraph that captures the result, the stakes,
+      and why it mattered in the group.
+    - A chronological match narrative built from the goals, half-time score, cards,
+      substitutions, and other listed events. If red cards are listed, explain how
+      they changed the match without inventing details beyond the event timeline.
+    - A statistics paragraph using expected goals, shots, shots on target,
+      possession, corners, big chances, or saves when those numbers are present.
+    - A personnel paragraph using the listed lineups/squads, formations, starters,
+      substitutes, and important player involvement where present.
+    - A group-standings paragraph explaining what the result means for both teams,
       based strictly on the standings table above.
+    - A concise closing paragraph about what each side takes into the next match.
 
     ABSOLUTE RULES — these cannot be broken under any circumstances:
+    - Your report must be driven by the AVAILABLE DATA above. If match events,
+      statistics, venue, referee, or standings are available, use them directly
+      and specifically in the report.
+    - If goals, red cards, half-time score, xG, shots on target, or lineups are
+      present in Match data, they must appear in the report.
+    - If match data says "Not available", write a shorter result-focused report
+      and state that detailed event/statistical data is not available. Do not
+      create a match narrative from imagination.
     - Only mention player names, referees, or venues that explicitly appear in the
       data above. Do not recall, invent, or assume any names from your training data.
     - Do not invent minute-by-minute events, cards, substitutions, or stats that
@@ -152,10 +225,11 @@ def generate_post_match_report(home_team, away_team, home_score, away_score, sta
     - Do not characterize the disciplinary tone of the match in any way beyond
       what the data explicitly shows.
     - No exclamation marks. Confident, measured tone throughout.
-    - Keep it under 280 words.
+    - If detailed match data is available, write 500-750 words. If match data is
+      not available, keep it under 250 words.
     """
 
-    response = client.chat.completions.create(
+    response = get_groq_client().chat.completions.create(
         model="llama-3.3-70b-versatile",
         messages=[{"role": "user", "content": prompt}]
     )
