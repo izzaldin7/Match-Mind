@@ -1,17 +1,65 @@
 import requests
-from bs4 import BeautifulSoup
 from database import Session, Match
 from dotenv import load_dotenv
 import os
 
 load_dotenv()
 
-FOOTBALL_API_KEY = os.getenv("FOOTBALL_API_KEY")
-FOOTBALL_HEADERS = {"X-Auth-Token": FOOTBALL_API_KEY}
-WIKI_HEADERS = {"User-Agent": "MatchMind/1.0 (portfolio project)"}
+HIGHLIGHTLY_API_KEY = os.getenv("HIGHLIGHTLY_API_KEY")
+HIGHLIGHTLY_HEADERS = {"x-rapidapi-key": HIGHLIGHTLY_API_KEY}
+HIGHLIGHTLY_BASE = "https://soccer.highlightly.net"
+WORLD_CUP_LEAGUE_ID = 1635
+WORLD_CUP_SEASON = 2026
+
+TEAM_IDS = {
+    "Algeria": 1304516, "Austria": 660309, "Jordan": 1318132, "Argentina": 22910,
+    "Congo DR": 1284092, "Uzbekistan": 1335152, "Colombia": 7592, "Portugal": 23761,
+    "Croatia": 3337, "Ghana": 1280688, "Panama": 10145, "England": 9294,
+    "Egypt": 28016, "Iran": 19506, "New Zealand": 3977507, "Belgium": 1635,
+    "Uruguay": 6741, "Spain": 8443, "Cape Verde": 1305367, "Saudi Arabia": 20357,
+    "Norway": 928374, "France": 2486, "Senegal": 11847, "Iraq": 1334301,
+    "Turkey": 662011, "USA": 2029568, "Paraguay": 2026164, "Australia": 17804,
+    "Tunisia": 24612, "Netherlands": 952202, "Japan": 10996, "Sweden": 5039,
+    "Ecuador": 2027866, "Germany": 22059, "Curaçao": 4706814, "Ivory Coast": 1278135,
+    "South Africa": 1303665, "South Korea": 15251, "Czech Republic": 656054,
+    "Mexico": 14400, "Morocco": 27165, "Haiti": 2031270, "Scotland": 943692,
+    "Brazil": 5890, "Bosnia & Herzegovina": 947947, "Qatar": 1336003,
+    "Switzerland": 13549, "Canada": 4705963
+}
+
+# Maps your DB's naming (from football-data.org) to Highlightly's naming
+TEAM_NAME_ALIASES = {
+    "Czechia": "Czech Republic",
+    "Cape Verde Islands": "Cape Verde",
+    "Bosnia-Herzegovina": "Bosnia & Herzegovina",
+    "United States": "USA",
+}
 
 
-# ── Standings from DB ──────────────────────────────────────────────
+def get_highlightly_team_id(db_team_name):
+    """
+    Resolves a team name (as stored in your DB) to its Highlightly team ID,
+    accounting for naming differences between data sources.
+    """
+    highlightly_name = TEAM_NAME_ALIASES.get(db_team_name, db_team_name)
+    return TEAM_IDS.get(highlightly_name)
+
+
+def _hl_get(endpoint, params=None):
+    """Internal helper for GET requests to Highlightly, with basic error handling."""
+    try:
+        url = f"{HIGHLIGHTLY_BASE}/{endpoint}"
+        response = requests.get(url, headers=HIGHLIGHTLY_HEADERS, params=params, timeout=10)
+        if response.status_code != 200:
+            print(f"Highlightly request failed [{endpoint}]: {response.status_code}")
+            return None
+        return response.json()
+    except Exception as e:
+        print(f"Highlightly request error [{endpoint}]: {e}")
+        return None
+
+
+# ── Standings from DB (unchanged, still reliable) ──────────────────
 
 def get_group_standings(group_name, exclude_match_id=None):
     session = Session()
@@ -38,15 +86,8 @@ def get_group_standings(group_name, exclude_match_id=None):
         for team in [home, away]:
             if team not in standings:
                 standings[team] = {
-                    "team": team,
-                    "played": 0,
-                    "won": 0,
-                    "drawn": 0,
-                    "lost": 0,
-                    "gf": 0,
-                    "ga": 0,
-                    "gd": 0,
-                    "points": 0
+                    "team": team, "played": 0, "won": 0, "drawn": 0, "lost": 0,
+                    "gf": 0, "ga": 0, "gd": 0, "points": 0
                 }
 
         standings[home]["played"] += 1
@@ -73,12 +114,7 @@ def get_group_standings(group_name, exclude_match_id=None):
     for team in standings:
         standings[team]["gd"] = standings[team]["gf"] - standings[team]["ga"]
 
-    sorted_standings = sorted(
-        standings.values(),
-        key=lambda x: (x["points"], x["gd"], x["gf"]),
-        reverse=True
-    )
-    return sorted_standings
+    return sorted(standings.values(), key=lambda x: (x["points"], x["gd"], x["gf"]), reverse=True)
 
 
 def format_standings_for_prompt(group_name, exclude_match_id=None):
@@ -119,227 +155,232 @@ def format_standings_for_prompt(group_name, exclude_match_id=None):
     return "\n".join(lines)
 
 
-# ── football-data.org match details + scorers ──────────────────────
+# ── Highlightly: match lookup ────────────────────────────────────
 
-def fetch_match_details(match_id):
+def find_highlightly_match_id(home_team, away_team, match_date):
     """
-    Fetches half-time score and referee from football-data.org.
-    Confirmed available on free tier.
+    Finds the Highlightly match ID for a given fixture by team names and date.
+    match_date should be 'YYYY-MM-DD' as stored in your DB.
     """
-    try:
-        url = f"https://api.football-data.org/v4/matches/{match_id}"
-        response = requests.get(url, headers=FOOTBALL_HEADERS, timeout=10)
-
-        if response.status_code != 200:
-            print(f"Match details fetch failed: {response.status_code}")
-            return None
-
-        data = response.json()
-        details = {}
-
-        score = data.get("score", {})
-        half_time = score.get("halfTime", {})
-        if half_time.get("home") is not None:
-            details["half_time"] = f"{half_time.get('home')}-{half_time.get('away')}"
-
-        referees = data.get("referees", [])
-        if referees:
-            details["referee"] = referees[0].get("name")
-            details["referee_nationality"] = referees[0].get("nationality")
-
-        return details if details else None
-
-    except Exception as e:
-        print(f"Match details fetch error: {e}")
+    data = _hl_get("matches", {
+        "leagueId": WORLD_CUP_LEAGUE_ID,
+        "season": WORLD_CUP_SEASON,
+        "limit": 100
+    })
+    if not data:
         return None
 
+    home_alias = TEAM_NAME_ALIASES.get(home_team, home_team)
+    away_alias = TEAM_NAME_ALIASES.get(away_team, away_team)
 
-def fetch_team_scorers(team_name):
+    for m in data.get("data", []):
+        m_home = m["homeTeam"]["name"]
+        m_away = m["awayTeam"]["name"]
+        m_date = m["date"][:10]
+
+        if m_home == home_alias and m_away == away_alias and m_date == match_date:
+            return m["id"]
+
+    return None
+
+
+# ── Highlightly: full match detail (events, stats, referee, venue) ─
+
+def fetch_highlightly_match(highlightly_match_id):
     """
-    Fetches the tournament's scorers list and filters for the given team.
-    Returns each player's goal/assist tally for the tournament so far.
-    Confirmed available on free tier.
+    Fetches full match detail from Highlightly: venue, referee, events
+    (goals, cards, substitutions), and team statistics.
     """
-    try:
-        url = "https://api.football-data.org/v4/competitions/WC/scorers"
-        params = {"limit": 100}
-        response = requests.get(url, headers=FOOTBALL_HEADERS, params=params, timeout=10)
+    data = _hl_get(f"matches/{highlightly_match_id}")
+    if not data or not isinstance(data, list) or len(data) == 0:
+        return None
+    return data[0]
 
-        if response.status_code != 200:
-            print(f"Scorers fetch failed: {response.status_code}")
-            return None
 
-        data = response.json()
-        scorers = data.get("scorers", [])
-
-        team_scorers = []
-        for s in scorers:
-            if s.get("team", {}).get("name") == team_name:
-                team_scorers.append({
-                    "name": s["player"]["name"],
-                    "goals": s["goals"],
-                    "assists": s.get("assists"),
-                    "played_matches": s["playedMatches"]
-                })
-
-        return team_scorers if team_scorers else None
-
-    except Exception as e:
-        print(f"Team scorers fetch error: {e}")
+def format_match_events(match_detail):
+    """
+    Formats goals, cards, and substitutions from a Highlightly match
+    detail object into a clean string for AI prompts.
+    """
+    events = match_detail.get("events", [])
+    if not events:
         return None
 
-
-def format_team_scorers(team_name):
-    """
-    Returns a formatted string of a team's goal involvements so far in the
-    tournament, for use in pre-match briefings.
-    """
-    scorers = fetch_team_scorers(team_name)
-    if not scorers:
-        return None
-
-    lines = [f"{team_name} - goal involvements so far this tournament:"]
-    for s in scorers:
-        assist_str = f", {s['assists']} assist(s)" if s['assists'] else ""
-        match_word = "match" if s['played_matches'] == 1 else "matches"
-        lines.append(f"  {s['name']}: {s['goals']} goal(s) in {s['played_matches']} {match_word}{assist_str}")
-
-    return "\n".join(lines)
-
-
-def get_match_context(match_id, home_team, away_team):
-    """
-    Builds a combined real-data context string for post-match reports:
-    half-time score, referee, and goal involvements for both teams
-    from the tournament's official scorer list.
-    """
     lines = []
+    goals = [e for e in events if e["type"] in ("Goal", "Penalty", "Own Goal")]
+    cards = [e for e in events if e["type"] in ("Yellow Card", "Red Card")]
+    subs = [e for e in events if e["type"] == "Substitution"]
 
-    details = fetch_match_details(match_id)
-    if details:
-        if "half_time" in details:
-            lines.append(f"Half-time score: {details['half_time']}")
-        if "referee" in details:
-            ref_nat = f" ({details['referee_nationality']})" if details.get("referee_nationality") else ""
-            lines.append(f"Referee: {details['referee']}{ref_nat}")
+    if goals:
+        lines.append("Goals:")
+        for g in goals:
+            assist_str = f" (assist: {g['assist']})" if g.get("assist") else ""
+            lines.append(f"  {g['time']}' {g['player']} ({g['team']['name']}){assist_str} [{g['type']}]")
 
-    home_scorers = fetch_team_scorers(home_team)
-    if home_scorers:
-        lines.append(f"\n{home_team} - goal involvements so far this tournament:")
-        for s in home_scorers:
-            assist_str = f", {s['assists']} assist(s)" if s['assists'] else ""
-            match_word = "match" if s['played_matches'] == 1 else "matches"
-            lines.append(f"  {s['name']}: {s['goals']} goal(s) in {s['played_matches']} {match_word}{assist_str}")
+    if cards:
+        lines.append("\nCards:")
+        for c in cards:
+            lines.append(f"  {c['time']}' {c['type']} - {c['player']} ({c['team']['name']})")
 
-    away_scorers = fetch_team_scorers(away_team)
-    if away_scorers:
-        lines.append(f"\n{away_team} - goal involvements so far this tournament:")
-        for s in away_scorers:
-            assist_str = f", {s['assists']} assist(s)" if s['assists'] else ""
-            match_word = "match" if s['played_matches'] == 1 else "matches"
-            lines.append(f"  {s['name']}: {s['goals']} goal(s) in {s['played_matches']} {match_word}{assist_str}")
+    if subs:
+        lines.append("\nSubstitutions:")
+        for s in subs:
+            lines.append(f"  {s['time']}' {s['player']} replaces {s['substituted']} ({s['team']['name']})")
 
     return "\n".join(lines) if lines else None
 
 
-# ── Wikipedia scraping ─────────────────────────────────────────────
-
-def _group_letter(group_name):
-    return group_name.replace("GROUP_", "").strip()
-
-
-def scrape_group_context(group_name):
+def format_match_statistics(match_detail):
     """
-    Scrapes Wikipedia's group page for historical h2h context.
-    Used to enrich match briefings.
+    Formats team statistics (possession, shots, xG, etc.) from a Highlightly
+    match detail object into a clean string for AI prompts.
     """
-    letter = _group_letter(group_name)
-    url = f"https://en.wikipedia.org/wiki/2026_FIFA_World_Cup_Group_{letter}"
-
-    try:
-        response = requests.get(url, headers=WIKI_HEADERS, timeout=10)
-        soup = BeautifulSoup(response.text, "html.parser")
-
-        content_div = soup.find("div", {"id": "mw-content-text"})
-        if not content_div:
-            return None
-
-        paragraphs = content_div.find_all("p")
-        text_blocks = []
-
-        for p in paragraphs:
-            text = p.get_text(strip=True)
-            if len(text) > 60:
-                text_blocks.append(text)
-
-        return "\n\n".join(text_blocks[:6]) if text_blocks else None
-
-    except Exception as e:
-        print(f"Wikipedia group scrape failed: {e}")
+    stats = match_detail.get("statistics", [])
+    if not stats or len(stats) < 2:
         return None
 
+    key_stats = [
+        "Possession", "Expected Goals", "Shots on target", "Shots off target",
+        "Big Chances Created", "Corners", "Fouls", "Yellow cards", "Red cards",
+        "Goalkeeper saves", "Successful Dribbles", "Key Passes"
+    ]
 
-def scrape_motm(home_team, away_team):
+    lines = ["Match Statistics:"]
+    for team_stats in stats:
+        team_name = team_stats["team"]["name"]
+        values = {s["displayName"]: s["value"] for s in team_stats.get("statistics", [])}
+        row = []
+        for stat_name in key_stats:
+            if stat_name in values:
+                val = values[stat_name]
+                if stat_name == "Possession":
+                    val = f"{round(val * 100)}%"
+                row.append(f"{stat_name}: {val}")
+        lines.append(f"  {team_name} — " + ", ".join(row))
+
+    return "\n".join(lines)
+
+
+def get_match_context(home_team, away_team, match_date, highlightly_match_id=None):
     """
-    Scrapes Wikipedia's individual match page for the Man of the Match award.
-    Returns the MOTM name as a string, or None if not available yet.
+    Builds the full real-data context string for post-match reports:
+    venue, referee, goals/cards/subs, and team statistics, all from Highlightly.
     """
-    home_wiki = home_team.replace(" ", "_")
-    away_wiki = away_team.replace(" ", "_")
-    url = f"https://en.wikipedia.org/wiki/{home_wiki}_v_{away_wiki}_(2026_FIFA_World_Cup)"
+    if not highlightly_match_id:
+        highlightly_match_id = find_highlightly_match_id(home_team, away_team, match_date)
 
-    try:
-        response = requests.get(url, headers=WIKI_HEADERS, timeout=10)
-
-        if response.status_code != 200:
-            return None
-
-        soup = BeautifulSoup(response.text, "html.parser")
-
-        infobox = soup.find("table", {"class": "infobox"})
-        if not infobox:
-            return None
-
-        rows = infobox.find_all("tr")
-        for row in rows:
-            header = row.find("th")
-            data = row.find("td")
-            if header and data:
-                header_text = header.get_text(strip=True).lower()
-                if "man of the match" in header_text or "motm" in header_text or "player of the match" in header_text:
-                    return data.get_text(strip=True)
-
+    if not highlightly_match_id:
         return None
 
-    except Exception as e:
-        print(f"Wikipedia MOTM scrape failed: {e}")
+    match_detail = fetch_highlightly_match(highlightly_match_id)
+    if not match_detail:
         return None
-    
-def scrape_match_summary(home_team, away_team):
+
+    lines = []
+
+    venue = match_detail.get("venue")
+    if venue:
+        lines.append(f"Venue: {venue.get('name')}, {venue.get('city')}, {venue.get('country')}")
+
+    referee = match_detail.get("referee")
+    if referee:
+        lines.append(f"Referee: {referee.get('name')} ({referee.get('nationality')})")
+
+    events_str = format_match_events(match_detail)
+    if events_str:
+        lines.append(f"\n{events_str}")
+
+    stats_str = format_match_statistics(match_detail)
+    if stats_str:
+        lines.append(f"\n{stats_str}")
+
+    return "\n".join(lines) if lines else None
+
+
+# ── Highlightly: head-to-head + team form for briefings ────────────
+
+def get_head_to_head(home_team, away_team):
     """
-    Scrapes the main 2026 FIFA World Cup Wikipedia page for the paragraph
-    summarizing a specific match. This page is updated quickly after matches
-    with goals, minutes, and disciplinary incidents.
+    Fetches historical head-to-head matches between two teams from Highlightly.
     """
-    url = "https://en.wikipedia.org/wiki/2026_FIFA_World_Cup"
+    home_id = get_highlightly_team_id(home_team)
+    away_id = get_highlightly_team_id(away_team)
 
-    try:
-        response = requests.get(url, headers=WIKI_HEADERS, timeout=10)
-        soup = BeautifulSoup(response.text, "html.parser")
-
-        content_div = soup.find("div", {"id": "mw-content-text"})
-        if not content_div:
-            return None
-
-        paragraphs = content_div.find_all("p")
-
-        for p in paragraphs:
-            text = p.get_text(strip=True)
-            if home_team in text and away_team in text and len(text) > 100:
-                return text
-
+    if not home_id or not away_id:
         return None
 
-    except Exception as e:
-        print(f"Wikipedia match summary scrape failed: {e}")
+    data = _hl_get("head-2-head", {"teamIdOne": home_id, "teamIdTwo": away_id})
+    if not data:
         return None
+
+    if not data:
+        return None
+
+    lines = [f"Head-to-head history between {home_team} and {away_team}:"]
+    for m in data[:5]:
+        m_home = m["homeTeam"]["name"]
+        m_away = m["awayTeam"]["name"]
+        score = m.get("state", {}).get("score", {}).get("current", "N/A")
+        date = m["date"][:10]
+        round_name = m.get("round", "")
+        lines.append(f"  {date} ({round_name}): {m_home} {score} {m_away}")
+
+    return "\n".join(lines) if len(lines) > 1 else None
+
+
+def get_team_tournament_form(team_name, exclude_match_id=None):
+    """
+    Fetches this team's matches so far in the 2026 World Cup from Highlightly,
+    and summarizes their goal involvements (scorers and assisters) across
+    those matches. Used to give briefings real prior-form context.
+    """
+    team_id = get_highlightly_team_id(team_name)
+    if not team_id:
+        return None
+
+    data = _hl_get("matches", {
+        "leagueId": WORLD_CUP_LEAGUE_ID,
+        "season": WORLD_CUP_SEASON,
+        "teamId": team_id,
+        "limit": 20
+    })
+    if not data:
+        return None
+
+    finished_matches = [
+        m for m in data.get("data", [])
+        if m.get("state", {}).get("description") == "Finished"
+        and m["id"] != exclude_match_id
+    ]
+
+    if not finished_matches:
+        return None
+
+    scorers = {}
+    for m in finished_matches:
+        detail = fetch_highlightly_match(m["id"])
+        if not detail:
+            continue
+        for e in detail.get("events", []):
+            if e["team"]["name"] != team_name and TEAM_NAME_ALIASES.get(team_name) != e["team"]["name"]:
+                continue
+            if e["type"] in ("Goal", "Penalty"):
+                scorers.setdefault(e["player"], {"goals": 0, "assists": 0})
+                scorers[e["player"]]["goals"] += 1
+                if e.get("assist"):
+                    scorers.setdefault(e["assist"], {"goals": 0, "assists": 0})
+                    scorers[e["assist"]]["assists"] += 1
+
+    if not scorers:
+        return None
+
+    lines = [f"{team_name} - goal involvements so far this tournament:"]
+    for player, tally in scorers.items():
+        parts = []
+        if tally["goals"]:
+            parts.append(f"{tally['goals']} goal(s)")
+        if tally["assists"]:
+            parts.append(f"{tally['assists']} assist(s)")
+        lines.append(f"  {player}: {', '.join(parts)}")
+
+    return "\n".join(lines)

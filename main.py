@@ -5,10 +5,8 @@ import os
 
 load_dotenv()
 
-API_KEY = os.getenv("FOOTBALL_API_KEY")
-
-url = "https://api.football-data.org/v4/competitions/WC/matches"
-headers = {"X-Auth-Token": API_KEY}
+HIGHLIGHTLY_API_KEY = os.getenv("HIGHLIGHTLY_API_KEY")
+HIGHLIGHTLY_HEADERS = {"x-rapidapi-key": HIGHLIGHTLY_API_KEY}
 
 response = requests.get(url, headers=headers)
 data = response.json()

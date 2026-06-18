@@ -6,46 +6,64 @@ import os
 
 load_dotenv()
 
-API_KEY = os.getenv("FOOTBALL_API_KEY")
-url = "https://api.football-data.org/v4/competitions/WC/matches"
-headers = {"X-Auth-Token": API_KEY}
+HIGHLIGHTLY_API_KEY = os.getenv("HIGHLIGHTLY_API_KEY")
+HIGHLIGHTLY_HEADERS = {"x-rapidapi-key": HIGHLIGHTLY_API_KEY}
 
 def refresh_match_data():
     print("Refreshing match data from football-data.org....")
-    response = requests.get(url, headers=headers)
-    data = response.json()
-    print(f"API returned {len(data['matches'])}matches")
+
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+    except requests.exceptions.RequestException as e:
+        print(f"Failed to fetch match data: {e}")
+        print("Skipping this refresh cycle, will retry in 5 minutes.")
+        return
+
+    print(f"API returned {len(data['matches'])} matches")
 
     session = Session()
-    for match in data['matches']:
-        existing = session.query(Match).filter_by(match_id=match['id']).first()
-        if existing:
-            print(f"Updating {match['homeTeam']['name']} vs {match['awayTeam']['name']}: {match['status']}")
-            existing.status = match['status']
-            existing.home_score = match['score']['fullTime']['home']
-            existing.away_score = match['score']['fullTime']['away']
-        else:
-            new_match = Match(
-                match_id = match['id'],
-                home_team = match['homeTeam']['name'],
-                away_team = match['awayTeam']['name'],
-                match_date = match['utcDate'][:10],
-                status = match['status'],
-                home_score = match['score']['fullTime']['home'],
-                away_score = match['score']['fullTime']['away'],
-                stage = match['stage'],
-                group_name = match.get('group')
-            )
-            session.add(new_match)
+    try:
+        for match in data['matches']:
+            existing = session.query(Match).filter_by(match_id=match['id']).first()
+            if existing:
+                print(f"Updating {match['homeTeam']['name']} vs {match['awayTeam']['name']}: {match['status']}")
+                existing.status = match['status']
+                existing.home_score = match['score']['fullTime']['home']
+                existing.away_score = match['score']['fullTime']['away']
+            else:
+                new_match = Match(
+                    match_id=match['id'],
+                    home_team=match['homeTeam']['name'],
+                    away_team=match['awayTeam']['name'],
+                    match_date=match['utcDate'][:10],
+                    status=match['status'],
+                    home_score=match['score']['fullTime']['home'],
+                    away_score=match['score']['fullTime']['away'],
+                    stage=match['stage'],
+                    group_name=match.get('group')
+                )
+                session.add(new_match)
 
-    session.commit()
-    session.close()
-    print("Match data refreshed successfully.")
+        session.commit()
+        print("Match data refreshed successfully.")
+    except Exception as e:
+        print(f"Error updating database: {e}")
+        session.rollback()
+    finally:
+        session.close()
+
 
 def start_scheduler():
     scheduler = BackgroundScheduler()
     scheduler.add_job(refresh_match_data, 'interval', minutes=5)
     scheduler.start()
-    refresh_match_data()
+
+    try:
+        refresh_match_data()
+    except Exception as e:
+        print(f"Initial refresh failed, will retry on next scheduled interval: {e}")
+
     print("Scheduler started - refreshing every 5 minutes.")
     return scheduler

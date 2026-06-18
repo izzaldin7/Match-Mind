@@ -4,21 +4,17 @@ from database import Session, Match
 from ai import generate_match_briefing, generate_post_match_report
 from scheduler import start_scheduler
 
-
 @asynccontextmanager
 async def lifespan(app):
     scheduler = start_scheduler()
     yield
     scheduler.shutdown()
 
-
 app = FastAPI(lifespan=lifespan)
-
 
 @app.get("/")
 def root():
     return {"message": "MatchMind API is running"}
-
 
 @app.get("/matches")
 def get_matches():
@@ -40,7 +36,6 @@ def get_matches():
         for m in matches
     ]
 
-
 @app.get("/matches/today")
 def get_today_matches():
     from datetime import date
@@ -60,18 +55,15 @@ def get_today_matches():
         for m in matches
     ]
 
-
 @app.get("/matches/{match_id}/briefing")
 def get_match_briefing(match_id: int):
     session = Session()
     match = session.query(Match).filter_by(match_id=match_id).first()
     session.close()
-
     if not match:
         return {"error": "Match not found"}
     if match.status == "FINISHED":
         return {"error": "This match has already finished. Briefings are only available for upcoming matches. Try the /report endpoint instead."}
-
     briefing = generate_match_briefing(
         home_team=match.home_team,
         away_team=match.away_team,
@@ -90,18 +82,15 @@ def get_match_briefing(match_id: int):
         "briefing": briefing
     }
 
-
 @app.get("/matches/{match_id}/report")
 def get_post_match_report(match_id: int):
     session = Session()
     match = session.query(Match).filter_by(match_id=match_id).first()
     session.close()
-
     if not match:
         return {"error": "Match not found"}
     if match.status != "FINISHED":
         return {"error": f"Match is not finished yet. Current status: {match.status}"}
-
     report = generate_post_match_report(
         home_team=match.home_team,
         away_team=match.away_team,
@@ -109,7 +98,8 @@ def get_post_match_report(match_id: int):
         away_score=match.away_score,
         stage=match.stage,
         group=match.group_name,
-        match_id=match.match_id
+        match_id=match.match_id,
+        match_date=match.match_date
     )
     return {
         "match_id": match_id,

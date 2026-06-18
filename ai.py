@@ -3,10 +3,9 @@ from dotenv import load_dotenv
 import os
 from utils import (
     format_standings_for_prompt,
-    scrape_group_context,
     get_match_context,
-    format_team_scorers,
-    scrape_motm
+    get_head_to_head,
+    get_team_tournament_form
 )
 
 load_dotenv()
@@ -23,15 +22,16 @@ def generate_match_briefing(home_team, away_team, match_date, stage, group=None,
 
     if group:
         standings_context = format_standings_for_prompt(group, exclude_match_id=match_id)
-        raw_wiki = scrape_group_context(group)
-        if raw_wiki:
-            wiki_context = f"Background and historical context:\n{raw_wiki}"
 
-    home_scorers = format_team_scorers(home_team)
-    away_scorers = format_team_scorers(away_team)
-    scorer_blocks = [s for s in [home_scorers, away_scorers] if s]
+    home_form = get_team_tournament_form(home_team, exclude_match_id=match_id)
+    away_form = get_team_tournament_form(away_team, exclude_match_id=match_id)
+    scorer_blocks = [s for s in [home_form, away_form] if s]
     if scorer_blocks:
         scorers_context = "\n\n".join(scorer_blocks)
+
+    h2h = get_head_to_head(home_team, away_team)
+    if h2h:
+        wiki_context = h2h
 
     prompt = f"""
     You are MatchMind, a football analyst covering the 2026 FIFA World Cup.
@@ -60,16 +60,19 @@ def generate_match_briefing(home_team, away_team, match_date, stage, group=None,
       them in naturally — e.g. a player who has already scored may be looking to
       add to his tally, or a team's goal threat may be concentrated in one player.
       Only reference players listed above.
-    - Any relevant historical context between these teams from the background
-      information, if present.
+    - Any relevant historical context between these teams from the head-to-head
+      data, if present.
     - A brief tactical outlook — how each side might approach this game given
       what's at stake
     - A considered prediction with a clear reason behind it
 
     ABSOLUTE RULES — these cannot be broken under any circumstances:
     - Only mention player names that explicitly appear in the data provided above
-      (goal involvements section or background context). Do not recall, assume,
+      (goal involvements section or head-to-head context). Do not recall, assume,
       or invent any player names from your training data.
+    - Do not mention, imply, or reference any disciplinary incidents — cards, red
+      cards, suspensions, or bans — for either team under any circumstances, unless
+      such information explicitly and literally appears in the data provided above.
     - Measure each team's situation purely from the standings and data provided.
       Do not assume form, tactics, or results beyond what the data shows.
     - If the standings show no matches played yet, do not invent any prior context.
@@ -84,7 +87,7 @@ def generate_match_briefing(home_team, away_team, match_date, stage, group=None,
     return response.choices[0].message.content
 
 
-def generate_post_match_report(home_team, away_team, home_score, away_score, stage, group=None, match_id=None):
+def generate_post_match_report(home_team, away_team, home_score, away_score, stage, group=None, match_id=None, match_date=None):
     group_info = f"Group {group}" if group else stage
     result = f"{home_team} {home_score}-{away_score} {away_team}"
 
@@ -100,16 +103,12 @@ def generate_post_match_report(home_team, away_team, home_score, away_score, sta
     motm_context = ""
 
     if group:
-        standings_context = format_standings_for_prompt(group)
+        standings_context = format_standings_for_prompt(group, exclude_match_id=match_id)
 
     if match_id:
-        raw_context = get_match_context(match_id, home_team, away_team)
+        raw_context = get_match_context(home_team, away_team, match_date=match_date, highlightly_match_id=match_id)
         if raw_context:
             match_context = f"Match data:\n{raw_context}"
-
-    motm = scrape_motm(home_team, away_team)
-    if motm:
-        motm_context = f"Man of the Match: {motm}"
 
     prompt = f"""
     You are MatchMind, a football analyst covering the 2026 FIFA World Cup.
@@ -131,32 +130,27 @@ def generate_post_match_report(home_team, away_team, home_score, away_score, sta
 
     Structure your report as follows:
     - A headline and opening paragraph that captures the result and its significance
-    - A match narrative built from the final score and half-time score above (if
-      available). Use the half-time score to establish the shape of the game —
-      whether the result was settled early, or the second half changed the picture.
-    - If goal involvements are listed for either team above, reference the players
-      responsible for that team's attacking threat this tournament naturally in the
-      narrative — but do not assign a specific player to a specific minute or half
-      unless that level of detail is explicitly given.
+    - A match narrative built from the goals, their minutes, and any other events
+      (cards, substitutions) listed in the match data above. Use the timeline to
+      show the shape of the game — when it turned, when it was sealed.
+    - If match statistics (possession, shots, big chances, etc.) are present in the
+      match data above, use them to support your description of how the game was
+      controlled — but only state numbers that appear explicitly in that data.
+    - If goal involvements are listed for either team above, you may reference
+      players responsible for that team's attacking threat this tournament.
     - The referee's name, if provided, can be mentioned briefly for color — purely
-      as a factual note (e.g. "the match was officiated by..."), without any
-      characterization of how the match was conducted (do not call it clean,
-      incident-free, feisty, or controversial — that information is not available).
-    - If a Man of the Match is listed above, give them a dedicated line acknowledging
-      the award.
+      as a factual note, without any characterization of how the match was
+      conducted.
     - What this result means for both teams in the group standings going forward,
       based strictly on the standings table above.
 
     ABSOLUTE RULES — these cannot be broken under any circumstances:
-    - Only mention player names that explicitly appear in the data above (goal
-      involvements or Man of the Match). Do not recall, invent, or assume any
-      player names from your training data.
+    - Only mention player names, referees, or venues that explicitly appear in the
+      data above. Do not recall, invent, or assume any names from your training data.
     - Do not invent minute-by-minute events, cards, substitutions, or stats that
       are not present in the data above.
-    - Do not characterize the disciplinary tone of the match in any way (clean,
-      incident-free, feisty, controversial, etc.) since that data is not available.
-    - If half-time score is not available, build the narrative from the full-time
-      score and standings only — do not invent how the goals were distributed.
+    - Do not characterize the disciplinary tone of the match in any way beyond
+      what the data explicitly shows.
     - No exclamation marks. Confident, measured tone throughout.
     - Keep it under 280 words.
     """
@@ -172,5 +166,5 @@ if __name__ == "__main__":
     briefing = generate_match_briefing("Mexico", "South Africa", "2026-06-11", "GROUP_STAGE", "GROUP_A", match_id=537327)
     print("BRIEFING:\n", briefing)
 
-    report = generate_post_match_report("Mexico", "South Africa", 2, 0, "GROUP_STAGE", "GROUP_A", match_id=537327)
+    report = generate_post_match_report("Mexico", "South Africa", 2, 0, "GROUP_STAGE", "GROUP_A", match_id=537327, match_date="2026-06-11")
     print("\nREPORT:\n", report)
