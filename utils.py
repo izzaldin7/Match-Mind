@@ -3,6 +3,7 @@ from database import Session, Match
 from dotenv import load_dotenv
 import os
 import re
+import time
 
 load_dotenv()
 
@@ -38,15 +39,21 @@ TEAM_NAME_ALIASES = {
 # ── In-memory cache ────────────────────────────────────────────────
 _cache = {
     "world_cup_matches": None,
+    "world_cup_matches_timestamp": 0,
     "match_details": {},
     "match_id_lookup": {},
     "head_to_head": {}
 }
 
+CACHE_TTL_SECONDS = 300
+
 
 def _get_world_cup_matches():
-    if _cache["world_cup_matches"] is None:
+    now = time.time()
+    if _cache["world_cup_matches"] is None or (now - _cache["world_cup_matches_timestamp"]) > CACHE_TTL_SECONDS:
         _cache["world_cup_matches"] = fetch_world_cup_matches()
+        _cache["world_cup_matches_timestamp"] = now
+        _cache["match_id_lookup"].clear()
     return _cache["world_cup_matches"]
 
 
@@ -769,7 +776,7 @@ def get_head_to_head(home_team, away_team):
         lines.append(f"  {date} ({round_name}): {m_home} {score} {m_away}")
 
     result = "\n".join(lines) if len(lines) > 1 else None
-    _cache["head_to_h2h"][cache_key] = result
+    _cache["head_to_head"][cache_key] = result
     return result
 
 

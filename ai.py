@@ -118,6 +118,9 @@ def build_post_match_context(home_team, away_team, home_score, away_score, stage
         context["qualification_notes"] = "\n".join(qualification_notes) if qualification_notes else None
 
     if match_date:
+        from utils import _cache
+        cache_key = (home_team, away_team, match_date)
+        _cache["match_id_lookup"].pop(cache_key, None)
         context["match_data"] = get_match_context(
             home_team,
             away_team,
