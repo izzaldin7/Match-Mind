@@ -17,53 +17,44 @@ st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
 
-    /* Base */
-    .stApp {
-        background-color: #0a0e1a;
-        color: #e8eaf0;
-    }
-
-    /* Hide default streamlit chrome */
+    .stApp { background-color: #0a0e1a; color: #e8eaf0; }
     #MainMenu, footer, header {visibility: hidden;}
     .block-container {padding: 2rem 3rem;}
 
-    /* Header */
     .mm-header {
-        display: flex;
-        align-items: baseline;
-        gap: 12px;
+        text-align: center;
         margin-bottom: 0.25rem;
     }
     .mm-logo {
         font-family: 'Bebas Neue', sans-serif;
-        font-size: 3rem;
+        font-size: 3.5rem;
         color: #ffffff;
-        letter-spacing: 2px;
+        letter-spacing: 4px;
         line-height: 1;
     }
-    .mm-logo span {
-        color: #00d4ff;
-    }
+    .mm-logo span { color: #FFD700; }
     .mm-tagline {
         font-family: 'Inter', sans-serif;
-        font-size: 0.75rem;
-        color: #5a6070;
-        letter-spacing: 3px;
+        font-size: 0.7rem;
+        color: #6a7080;
+        letter-spacing: 4px;
         text-transform: uppercase;
         font-weight: 500;
+        margin-top: 0.25rem;
     }
     .mm-divider {
         height: 1px;
-        background: linear-gradient(90deg, #00d4ff 0%, #0040ff 50%, transparent 100%);
-        margin: 1rem 0 2rem 0;
-        opacity: 0.4;
+        background: linear-gradient(90deg, transparent 0%, #FFD700 30%, #FF8C00 70%, transparent 100%);
+        margin: 1rem auto 2rem auto;
+        opacity: 0.5;
+        max-width: 600px;
     }
 
-    /* Nav tabs */
     .stTabs [data-baseweb="tab-list"] {
         background: transparent;
         gap: 0;
         border-bottom: 1px solid #1a2035;
+        justify-content: center;
     }
     .stTabs [data-baseweb="tab"] {
         font-family: 'Inter', sans-serif;
@@ -72,97 +63,52 @@ st.markdown("""
         letter-spacing: 2px;
         text-transform: uppercase;
         color: #5a6070;
-        padding: 0.75rem 1.5rem;
+        padding: 0.75rem 2rem;
         border-bottom: 2px solid transparent;
         background: transparent;
     }
     .stTabs [aria-selected="true"] {
-        color: #00d4ff !important;
-        border-bottom: 2px solid #00d4ff !important;
+        color: #FFD700 !important;
+        border-bottom: 2px solid #FFD700 !important;
         background: transparent !important;
     }
-    .stTabs [data-baseweb="tab-panel"] {
-        padding-top: 2rem;
-    }
+    .stTabs [data-baseweb="tab-panel"] { padding-top: 2rem; }
 
-    /* Match cards */
     .match-card {
         background: #0f1525;
         border: 1px solid #1a2035;
         border-radius: 4px;
         padding: 1.25rem 1.5rem;
         margin-bottom: 0.75rem;
-        position: relative;
+        cursor: pointer;
         transition: border-color 0.2s;
     }
-    .match-card:hover {
-        border-color: #00d4ff30;
-    }
-    .match-card-live {
-        border-left: 3px solid #ff3b5c;
-    }
-    .match-card-finished {
-        border-left: 3px solid #2a3045;
-    }
-    .match-card-upcoming {
-        border-left: 3px solid #00d4ff;
-    }
-    .match-teams {
-        font-family: 'Inter', sans-serif;
-        font-size: 1rem;
-        font-weight: 600;
-        color: #e8eaf0;
-        display: flex;
-        align-items: center;
-        gap: 1rem;
-    }
-    .match-score {
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 1.1rem;
-        font-weight: 500;
-        color: #ffffff;
-        background: #1a2035;
-        padding: 0.2rem 0.6rem;
-        border-radius: 3px;
-        min-width: 60px;
-        text-align: center;
-    }
-    .match-meta {
-        font-family: 'Inter', sans-serif;
-        font-size: 0.7rem;
-        color: #5a6070;
-        letter-spacing: 1px;
-        text-transform: uppercase;
-        margin-top: 0.4rem;
-    }
-    .status-live {
-        color: #ff3b5c;
-        font-weight: 600;
-        animation: pulse 2s infinite;
-    }
-    .status-finished {color: #5a6070;}
-    .status-upcoming {color: #00d4ff;}
+    .match-card:hover { border-color: #FFD70030; }
+    .match-card-live { border-left: 3px solid #ff3b5c; }
+    .match-card-finished { border-left: 3px solid #FF8C00; }
+    .match-card-upcoming { border-left: 3px solid #FFD700; }
+
+    .status-live { color: #ff3b5c; font-weight: 600; animation: pulse 2s infinite; }
+    .status-finished { color: #FF8C00; }
+    .status-upcoming { color: #FFD700; }
 
     @keyframes pulse {
         0%, 100% {opacity: 1;}
         50% {opacity: 0.5;}
     }
 
-    /* Group badge */
     .group-badge {
         display: inline-block;
         font-family: 'JetBrains Mono', monospace;
         font-size: 0.65rem;
-        color: #00d4ff;
-        background: #00d4ff15;
-        border: 1px solid #00d4ff30;
+        color: #FFD700;
+        background: #FFD70015;
+        border: 1px solid #FFD70030;
         padding: 0.15rem 0.5rem;
         border-radius: 2px;
         letter-spacing: 1px;
-        margin-right: 0.5rem;
     }
 
-    /* AI output */
     .ai-output {
         background: #0f1525;
         border: 1px solid #1a2035;
@@ -177,13 +123,12 @@ st.markdown("""
         font-family: 'Bebas Neue', sans-serif;
         font-size: 1.6rem;
         letter-spacing: 3px;
-        color: #00d4ff;
+        color: #FFD700;
         margin-bottom: 1.25rem;
         padding-bottom: 0.75rem;
         border-bottom: 1px solid #1a2035;
     }
 
-    /* Fixture header */
     .fixture-header {
         background: linear-gradient(135deg, #0f1525 0%, #111827 100%);
         border: 1px solid #1a2035;
@@ -210,7 +155,7 @@ st.markdown("""
         font-family: 'JetBrains Mono', monospace;
         font-size: 3rem;
         font-weight: 500;
-        color: #00d4ff;
+        color: #FFD700;
         margin: 0.5rem 0;
     }
     .fixture-sub {
@@ -222,7 +167,6 @@ st.markdown("""
         margin-top: 0.5rem;
     }
 
-    /* Buttons */
     .stButton button {
         font-family: 'Inter', sans-serif;
         font-size: 0.75rem;
@@ -230,19 +174,18 @@ st.markdown("""
         letter-spacing: 2px;
         text-transform: uppercase;
         background: transparent;
-        color: #00d4ff;
-        border: 1px solid #00d4ff40;
+        color: #FFD700;
+        border: 1px solid #FFD70040;
         border-radius: 3px;
         padding: 0.5rem 1.25rem;
         transition: all 0.2s;
         width: 100%;
     }
     .stButton button:hover {
-        background: #00d4ff10;
-        border-color: #00d4ff;
+        background: #FFD70010;
+        border-color: #FFD700;
     }
 
-    /* Selectbox */
     .stSelectbox label {
         font-family: 'Inter', sans-serif;
         font-size: 0.7rem;
@@ -255,7 +198,6 @@ st.markdown("""
         border-color: #1a2035;
     }
 
-    /* Error/info */
     .stAlert {
         background: #0f1525;
         border-color: #1a2035;
@@ -263,10 +205,8 @@ st.markdown("""
         font-size: 0.85rem;
     }
 
-    /* Spinner */
-    .stSpinner {color: #00d4ff;}
+    .stSpinner { color: #FFD700; }
 
-    /* Section label */
     .section-label {
         font-family: 'Inter', sans-serif;
         font-size: 0.65rem;
@@ -276,34 +216,52 @@ st.markdown("""
         margin-bottom: 1rem;
     }
 
-    /* Stats grid */
-    .stats-grid {
-        display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: 0.75rem;
-        margin-top: 1rem;
+    .standings-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-family: 'Inter', sans-serif;
+        font-size: 0.8rem;
+        margin-bottom: 1.5rem;
     }
-    .stat-box {
-        background: #0f1525;
-        border: 1px solid #1a2035;
-        border-radius: 3px;
-        padding: 0.75rem 1rem;
+    .standings-table th {
+        font-size: 0.65rem;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+        color: #5a6070;
+        padding: 0.5rem 0.75rem;
+        border-bottom: 1px solid #1a2035;
         text-align: center;
     }
-    .stat-value {
+    .standings-table th:first-child { text-align: left; }
+    .standings-table td {
+        padding: 0.6rem 0.75rem;
+        color: #c8cad4;
+        border-bottom: 1px solid #0f1525;
+        text-align: center;
+    }
+    .standings-table td:first-child {
+        text-align: left;
+        font-weight: 600;
+        color: #e8eaf0;
+    }
+    .standings-table tr:last-child td { border-bottom: none; }
+    .standings-pts {
         font-family: 'JetBrains Mono', monospace;
-        font-size: 1.3rem;
-        color: #ffffff;
-        font-weight: 500;
+        color: #FFD700 !important;
+        font-weight: 600;
     }
-    .stat-label {
-        font-family: 'Inter', sans-serif;
-        font-size: 0.65rem;
-        color: #5a6070;
-        letter-spacing: 1px;
-        text-transform: uppercase;
-        margin-top: 0.25rem;
+
+    .report-card {
+        background: #0f1525;
+        border: 1px solid #1a2035;
+        border-left: 3px solid #FF8C00;
+        border-radius: 4px;
+        padding: 1rem 1.25rem;
+        margin-bottom: 0.5rem;
+        cursor: pointer;
+        transition: border-color 0.2s;
     }
+    .report-card:hover { border-color: #FFD700; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -329,7 +287,7 @@ def status_class(status):
     s = status.upper()
     if s in ("IN_PLAY", "PAUSED", "HALFTIME"):
         return "match-card-live", "status-live", "● LIVE"
-    elif s in ("FINISHED", "FINISHED"):
+    elif s in ("FINISHED",):
         return "match-card-finished", "status-finished", "FINISHED"
     else:
         return "match-card-upcoming", "status-upcoming", "UPCOMING"
@@ -349,6 +307,7 @@ def group_display(group):
         return ""
     return group.replace("GROUP_", "Group ")
 
+
 def format_ai_text(text):
     if not text:
         return ""
@@ -367,13 +326,139 @@ def format_ai_text(text):
     return ''.join(lines_html)
 
 
+def render_match_card(m, key_prefix=""):
+    card_class, status_cls, status_label = status_class(m["status"])
+    score = format_score(m.get("home_score"), m.get("away_score"), m["status"])
+    group_badge = f'<span class="group-badge">{group_display(m.get("group", ""))}</span>' if m.get("group") else ""
+    is_finished = m["status"].upper() in ("FINISHED",)
+    is_upcoming = m["status"].upper() not in ("FINISHED", "IN_PLAY", "PAUSED", "HALFTIME")
+
+    st.markdown(f"""
+    <div class="match-card {card_class}">
+        <div style="display:flex;align-items:center;justify-content:center;gap:1.5rem;">
+            <div style="font-family:'Bebas Neue',sans-serif;font-size:1.6rem;letter-spacing:2px;color:#ffffff;text-align:right;flex:1;">
+                {m['home_team']}
+            </div>
+            <div style="font-family:'JetBrains Mono',monospace;font-size:1.6rem;font-weight:500;color:#FFD700;min-width:90px;text-align:center;line-height:1;position:relative;top:-2px;">
+                {score}
+            </div>
+            <div style="font-family:'Bebas Neue',sans-serif;font-size:1.6rem;letter-spacing:2px;color:#ffffff;text-align:left;flex:1;">
+                {m['away_team']}
+            </div>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:center;gap:0.75rem;margin-top:0.5rem;">
+            {group_badge}
+            <span class="{status_cls}" style="font-family:'Inter',sans-serif;font-size:0.65rem;letter-spacing:1px;text-transform:uppercase;">{status_label}</span>
+            {f'<span style="color:#5a6070;font-family:Inter,sans-serif;font-size:0.65rem;">{m.get("date","")}</span>' if m.get("date") else ""}
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    col1, col2 = st.columns(2)
+    if is_upcoming:
+        with col1:
+            if st.button("Generate Briefing", key=f"{key_prefix}_brief_{m['match_id']}"):
+                with st.spinner("Analysing fixture..."):
+                    result = api_get(f"/matches/{m['match_id']}/briefing")
+                if result and "error" not in result:
+                    st.session_state[f"ai_result_{m['match_id']}"] = ("briefing", result)
+                elif result:
+                    st.error(result["error"])
+    elif is_finished:
+        with col1:
+            if st.button("Generate Report", key=f"{key_prefix}_report_{m['match_id']}"):
+                with st.spinner("Compiling match report..."):
+                    result = api_get(f"/matches/{m['match_id']}/report")
+                if result and "error" not in result:
+                    st.session_state[f"ai_result_{m['match_id']}"] = ("report", result)
+                elif result:
+                    st.error(result["error"])
+
+    # Display AI result inline below this card
+    key = f"ai_result_{m['match_id']}"
+    if key in st.session_state:
+        result_type, r = st.session_state[key]
+        if result_type == "briefing":
+            st.markdown(f"""
+            <div class="fixture-header">
+                <div>
+                    <span class="fixture-teams-big">{r['home_team']}</span>
+                    <span class="fixture-vs">vs</span>
+                    <span class="fixture-teams-big">{r['away_team']}</span>
+                </div>
+                <div class="fixture-sub">
+                    <span class="group-badge">{group_display(r.get('group', ''))}</span>
+                    &nbsp;{r.get('date', '')} · Pre-Match Briefing
+                </div>
+            </div>
+            <div class="ai-output">
+                <div class="ai-output-header">Match Intelligence</div>
+                {format_ai_text(r['briefing'])}
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            home_s = r.get("home_score", "?")
+            away_s = r.get("away_score", "?")
+            st.markdown(f"""
+            <div class="fixture-header">
+                <div>
+                    <span class="fixture-teams-big">{r['home_team']}</span>
+                    <span class="fixture-vs">vs</span>
+                    <span class="fixture-teams-big">{r['away_team']}</span>
+                </div>
+                <div class="fixture-score-big">{home_s} — {away_s}</div>
+                <div class="fixture-sub">
+                    <span class="group-badge">{group_display(r.get('group', ''))}</span>
+                    &nbsp;Full Time · Post-Match Report
+                </div>
+            </div>
+            <div class="ai-output">
+                <div class="ai-output-header">Match Report</div>
+                {format_ai_text(r['report'])}
+            </div>
+            """, unsafe_allow_html=True)
+
+
+def render_standings_table(standings):
+    if not standings:
+        return
+    rows_html = ""
+    for i, row in enumerate(standings):
+        qual_color = "#FFD700" if i < 2 else "#c8cad4"
+        rows_html += f"""
+        <tr>
+            <td style="color:{qual_color};font-weight:600;">{row['team']}</td>
+            <td>{row['played']}</td>
+            <td>{row['won']}</td>
+            <td>{row['drawn']}</td>
+            <td>{row['lost']}</td>
+            <td>{row['gf']}</td>
+            <td>{row['ga']}</td>
+            <td>{row['gd']}</td>
+            <td class="standings-pts">{row['points']}</td>
+        </tr>
+        """
+    st.markdown(f"""
+    <table class="standings-table">
+        <thead>
+            <tr>
+                <th>Team</th>
+                <th>P</th><th>W</th><th>D</th><th>L</th>
+                <th>GF</th><th>GA</th><th>GD</th><th>Pts</th>
+            </tr>
+        </thead>
+        <tbody>{rows_html}</tbody>
+    </table>
+    """, unsafe_allow_html=True)
+
+
 # ── Header ─────────────────────────────────────────────────────────
 
 st.markdown("""
 <div class="mm-header">
     <div class="mm-logo">Match<span>Mind</span></div>
+    <div class="mm-tagline">AI-Powered FIFA World Cup 2026 Companion</div>
 </div>
-<div class="mm-tagline">AI-Powered FIFA World Cup 2026 Companion</div>
 <div class="mm-divider"></div>
 """, unsafe_allow_html=True)
 
@@ -399,136 +484,14 @@ with tab1:
     if not data:
         st.markdown("""
         <div class="match-card">
-            <div class="match-meta">No matches scheduled today.</div>
+            <div style="text-align:center;font-family:'Inter',sans-serif;font-size:0.85rem;color:#5a6070;padding:0.5rem;">
+                No matches scheduled today.
+            </div>
         </div>
         """, unsafe_allow_html=True)
     else:
         for m in data:
-            card_class, status_cls, status_label = status_class(m["status"])
-            score = format_score(m["home_score"], m["away_score"], m["status"])
-            group_badge = f'<span class="group-badge">{group_display(m.get("group", ""))}</span>' if m.get("group") else ""
-            st.markdown(f"""
-            <div class="match-card {card_class}">
-                <div style="display:flex;align-items:center;justify-content:center;gap:1.5rem;">
-                    <div style="font-family:'Bebas Neue',sans-serif;font-size:1.6rem;letter-spacing:2px;color:#ffffff;text-align:right;flex:1;">
-                        {m['home_team']}
-                    </div>
-                    <div style="font-family:'JetBrains Mono',monospace;font-size:1.6rem;font-weight:500;color:#00d4ff;min-width:90px;text-align:center;line-height:1;position:relative;top:-2px;">
-                        {score}
-                    </div>
-                    <div style="font-family:'Bebas Neue',sans-serif;font-size:1.6rem;letter-spacing:2px;color:#ffffff;text-align:left;flex:1;">
-                        {m['away_team']}
-                    </div>
-                </div>
-                <div style="display:flex;align-items:center;justify-content:center;gap:0.75rem;margin-top:0.5rem;">
-                    {group_badge}
-                    <span class="{status_cls}" style="font-family:'Inter',sans-serif;font-size:0.65rem;letter-spacing:1px;text-transform:uppercase;">{status_label}</span>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-
-        # ── Briefing / Report selector ──────────────────────────
-        st.markdown("<br>", unsafe_allow_html=True)
-
-        upcoming = [m for m in data if m["status"].upper() not in ("FINISHED",)]
-        finished = [m for m in data if m["status"].upper() in ("FINISHED",)]
-
-        col1, col2 = st.columns(2)
-
-        with col1:
-            st.markdown('<div class="section-label">Pre-Match Briefing</div>', unsafe_allow_html=True)
-            if upcoming:
-                briefing_options = {
-                    f"{m['home_team']} vs {m['away_team']}": m['match_id']
-                    for m in upcoming
-                }
-                selected_briefing = st.selectbox(
-                    "Select match",
-                    options=list(briefing_options.keys()),
-                    key="briefing_select",
-                    label_visibility="collapsed"
-                )
-                if st.button("Generate Briefing", key="gen_briefing"):
-                    match_id = briefing_options[selected_briefing]
-                    with st.spinner("Analysing fixture..."):
-                        result = api_get(f"/matches/{match_id}/briefing")
-                    if result and "error" not in result:
-                        st.session_state["briefing_result"] = result
-                    elif result:
-                        st.error(result["error"])
-            else:
-                st.markdown('<div class="match-card"><div class="match-meta">No upcoming matches today.</div></div>', unsafe_allow_html=True)
-
-        with col2:
-            st.markdown('<div class="section-label">Post-Match Report</div>', unsafe_allow_html=True)
-            if finished:
-                report_options = {
-                    f"{m['home_team']} vs {m['away_team']}": m['match_id']
-                    for m in finished
-                }
-                selected_report = st.selectbox(
-                    "Select match",
-                    options=list(report_options.keys()),
-                    key="report_select",
-                    label_visibility="collapsed"
-                )
-                if st.button("Generate Report", key="gen_report"):
-                    match_id = report_options[selected_report]
-                    with st.spinner("Compiling match report..."):
-                        result = api_get(f"/matches/{match_id}/report")
-                    if result and "error" not in result:
-                        st.session_state["report_result"] = result
-                    elif result:
-                        st.error(result["error"])
-            else:
-                st.markdown('<div class="match-card"><div class="match-meta">No finished matches today yet.</div></div>', unsafe_allow_html=True)
-
-        # ── Display briefing result ─────────────────────────────
-        if "briefing_result" in st.session_state:
-            r = st.session_state["briefing_result"]
-            st.markdown("<br>", unsafe_allow_html=True)
-            st.markdown(f"""
-            <div class="fixture-header">
-                <div>
-                    <span class="fixture-teams-big">{r['home_team']}</span>
-                    <span class="fixture-vs">vs</span>
-                    <span class="fixture-teams-big">{r['away_team']}</span>
-                </div>
-                <div class="fixture-sub">
-                    <span class="group-badge">{group_display(r.get('group', ''))}</span>
-                    {r.get('date', '')} · Pre-Match Briefing
-                </div>
-            </div>
-            <div class="ai-output">
-                <div class="ai-output-header">Match Intelligence</div>
-                {format_ai_text(r['briefing'])}
-            </div>
-            """, unsafe_allow_html=True)
-
-        # ── Display report result ───────────────────────────────
-        if "report_result" in st.session_state:
-            r = st.session_state["report_result"]
-            home_s = r.get("home_score", "?")
-            away_s = r.get("away_score", "?")
-            st.markdown("<br>", unsafe_allow_html=True)
-            st.markdown(f"""
-            <div class="fixture-header">
-                <div>
-                    <span class="fixture-teams-big">{r['home_team']}</span>
-                    <span class="fixture-vs">vs</span>
-                    <span class="fixture-teams-big">{r['away_team']}</span>
-                </div>
-                <div class="fixture-score-big">{home_s} — {away_s}</div>
-                <div class="fixture-sub">
-                    <span class="group-badge">{group_display(r.get('group', ''))}</span>
-                    Full Time · Post-Match Report
-                </div>
-            </div>
-            <div class="ai-output">
-                <div class="ai-output-header">Match Report</div>
-                {format_ai_text(r['report'])}
-            </div>
-            """, unsafe_allow_html=True)
+            render_match_card(m, key_prefix="today")
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -539,7 +502,6 @@ with tab2:
     all_data = api_get("/matches")
 
     if all_data and "error" not in all_data:
-        # Group by group_name
         groups = {}
         knockout = []
         for m in all_data:
@@ -549,21 +511,12 @@ with tab2:
             else:
                 knockout.append(m)
 
-        # Filter controls
         col1, col2 = st.columns([2, 1])
         with col1:
             group_options = ["All Groups"] + sorted(groups.keys())
-            selected_group = st.selectbox(
-                "Filter by group",
-                group_options,
-                label_visibility="collapsed"
-            )
+            selected_group = st.selectbox("Filter by group", group_options, label_visibility="collapsed")
         with col2:
-            status_filter = st.selectbox(
-                "Filter by status",
-                ["All", "Upcoming", "Finished"],
-                label_visibility="collapsed"
-            )
+            status_filter = st.selectbox("Filter by status", ["All", "Upcoming", "Finished"], label_visibility="collapsed")
 
         st.markdown("<br>", unsafe_allow_html=True)
 
@@ -574,51 +527,49 @@ with tab2:
                 return [m for m in matches if m["status"].upper() in ("FINISHED",)]
             return matches
 
-        def render_group(group_name, matches):
+        def render_group_section(group_name, matches):
             filtered = filter_matches(matches)
-            if not filtered:
+            if not filtered and status_filter != "All":
                 return
+
             st.markdown(f'<div class="section-label">{group_display(group_name)}</div>', unsafe_allow_html=True)
-            for m in filtered:
-                card_class, status_cls, status_label = status_class(m["status"])
-                score = format_score(m["home_score"], m["away_score"], m["status"])
-                st.markdown(f"""
-                <div class="match-card {card_class}">
-                    <div style="display:flex;align-items:center;justify-content:center;gap:1.5rem;">
-                        <div style="font-family:'Bebas Neue',sans-serif;font-size:1.6rem;letter-spacing:2px;color:#ffffff;text-align:right;flex:1;">
-                            {m['home_team']}
-                        </div>
-                        <div style="font-family:'JetBrains Mono',monospace;font-size:1.6rem;font-weight:500;color:#00d4ff;min-width:90px;text-align:center;line-height:1;position:relative;top:-2px;">
-                            {score}
-                        </div>
-                        <div style="font-family:'Bebas Neue',sans-serif;font-size:1.6rem;letter-spacing:2px;color:#ffffff;text-align:left;flex:1;">
-                            {m['away_team']}
-                        </div>
-                    </div>
-                    <div style="display:flex;align-items:center;justify-content:center;gap:0.75rem;margin-top:0.5rem;">
-                        <span class="group-badge">{group_display(group_name)}</span>
-                        <span class="{status_cls}" style="font-family:'Inter',sans-serif;font-size:0.65rem;letter-spacing:1px;text-transform:uppercase;">{status_label}</span>
-                        <span style="color:#5a6070;font-family:'Inter',sans-serif;font-size:0.65rem;letter-spacing:1px;">{m.get('date', '')}</span>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-            st.markdown("<br>", unsafe_allow_html=True)
+
+            left_col, right_col = st.columns([3, 2])
+
+            with left_col:
+                st.markdown('<div class="section-label">Matches</div>', unsafe_allow_html=True)
+                if filtered:
+                    for m in filtered:
+                        render_match_card(m, key_prefix=f"fix_{group_name}")
+                else:
+                    st.markdown('<div style="color:#5a6070;font-size:0.8rem;padding:0.5rem 0;">No matches for this filter.</div>', unsafe_allow_html=True)
+
+            with right_col:
+                st.markdown('<div class="section-label">Standings</div>', unsafe_allow_html=True)
+                from utils import get_group_standings
+                standings = get_group_standings(group_name)
+                if standings:
+                    render_standings_table(standings)
+                else:
+                    st.markdown('<div style="color:#5a6070;font-size:0.8rem;padding:0.5rem 0;">No matches played yet.</div>', unsafe_allow_html=True)
+
+            st.markdown("<hr style='border:none;border-top:1px solid #1a2035;margin:1.5rem 0;'>", unsafe_allow_html=True)
 
         if selected_group == "All Groups":
             for g in sorted(groups.keys()):
-                render_group(g, groups[g])
+                render_group_section(g, groups[g])
             if knockout:
-                render_group("Knockout Stage", knockout)
+                render_group_section("Knockout Stage", knockout)
         else:
-            render_group(selected_group, groups.get(selected_group, []))
+            render_group_section(selected_group, groups.get(selected_group, []))
 
 
 # ══════════════════════════════════════════════════════════════════
-# TAB 3 — REPORTS (browse finished matches)
+# TAB 3 — REPORTS
 # ══════════════════════════════════════════════════════════════════
 
 with tab3:
-    st.markdown('<div class="section-label">Generate a report for any finished match</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-label">Finished Matches — Click to Generate Report</div>', unsafe_allow_html=True)
 
     all_matches = api_get("/matches")
 
@@ -629,51 +580,17 @@ with tab3:
         ]
 
         if not finished_matches:
-            st.markdown('<div class="match-card"><div class="match-meta">No finished matches yet.</div></div>', unsafe_allow_html=True)
+            st.markdown('<div style="color:#5a6070;font-size:0.85rem;padding:1rem 0;">No finished matches yet.</div>', unsafe_allow_html=True)
         else:
-            # Sort by date descending
             finished_matches.sort(key=lambda x: x.get("date", ""), reverse=True)
 
-            report_options = {
-                f"{m['home_team']} vs {m['away_team']} ({m.get('date', '')}) — {group_display(m.get('group', 'Knockout'))}": m['match_id']
-                for m in finished_matches
-            }
+            # Group by date
+            by_date = {}
+            for m in finished_matches:
+                d = m.get("date", "Unknown")
+                by_date.setdefault(d, []).append(m)
 
-            selected = st.selectbox(
-                "Select a finished match",
-                options=list(report_options.keys()),
-                label_visibility="collapsed"
-            )
-
-            if st.button("Generate Report", key="gen_report_tab3"):
-                match_id = report_options[selected]
-                with st.spinner("Compiling match report..."):
-                    result = api_get(f"/matches/{match_id}/report")
-                if result and "error" not in result:
-                    st.session_state["tab3_report"] = result
-                elif result:
-                    st.error(result["error"])
-
-        if "tab3_report" in st.session_state:
-            r = st.session_state["tab3_report"]
-            home_s = r.get("home_score", "?")
-            away_s = r.get("away_score", "?")
-            st.markdown("<br>", unsafe_allow_html=True)
-            st.markdown(f"""
-            <div class="fixture-header">
-                <div>
-                    <span class="fixture-teams-big">{r['home_team']}</span>
-                    <span class="fixture-vs">vs</span>
-                    <span class="fixture-teams-big">{r['away_team']}</span>
-                </div>
-                <div class="fixture-score-big">{home_s} — {away_s}</div>
-                <div class="fixture-sub">
-                    <span class="group-badge">{group_display(r.get('group', ''))}</span>
-                    Full Time · Post-Match Report
-                </div>
-            </div>
-            <div class="ai-output">
-                <div class="ai-output-header">Match Report</div>
-                {format_ai_text(r['report'])}
-            </div>
-            """, unsafe_allow_html=True)
+            for date_key in sorted(by_date.keys(), reverse=True):
+                st.markdown(f'<div class="section-label">{date_key}</div>', unsafe_allow_html=True)
+                for m in by_date[date_key]:
+                    render_match_card(m, key_prefix="reports")
