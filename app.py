@@ -406,17 +406,23 @@ with tab1:
         for m in data:
             card_class, status_cls, status_label = status_class(m["status"])
             score = format_score(m["home_score"], m["away_score"], m["status"])
-
+            group_badge = f'<span class="group-badge">{group_display(m.get("group", ""))}</span>' if m.get("group") else ""
             st.markdown(f"""
             <div class="match-card {card_class}">
-                <div class="match-teams">
-                    {m['home_team']}
-                    <span class="match-score">{score}</span>
-                    {m['away_team']}
+                <div style="display:flex;align-items:center;justify-content:center;gap:1.5rem;">
+                    <div style="font-family:'Bebas Neue',sans-serif;font-size:1.6rem;letter-spacing:2px;color:#ffffff;text-align:right;flex:1;">
+                        {m['home_team']}
+                    </div>
+                    <div style="font-family:'JetBrains Mono',monospace;font-size:1.6rem;font-weight:500;color:#00d4ff;min-width:90px;text-align:center;line-height:1;position:relative;top:-2px;">
+                        {score}
+                    </div>
+                    <div style="font-family:'Bebas Neue',sans-serif;font-size:1.6rem;letter-spacing:2px;color:#ffffff;text-align:left;flex:1;">
+                        {m['away_team']}
+                    </div>
                 </div>
-                <div class="match-meta">
-                    <span class="{status_cls}">{status_label}</span>
-                    &nbsp;·&nbsp; ID {m['match_id']}
+                <div style="display:flex;align-items:center;justify-content:center;gap:0.75rem;margin-top:0.5rem;">
+                    {group_badge}
+                    <span class="{status_cls}" style="font-family:'Inter',sans-serif;font-size:0.65rem;letter-spacing:1px;text-transform:uppercase;">{status_label}</span>
                 </div>
             </div>
             """, unsafe_allow_html=True)
@@ -578,15 +584,21 @@ with tab2:
                 score = format_score(m["home_score"], m["away_score"], m["status"])
                 st.markdown(f"""
                 <div class="match-card {card_class}">
-                    <div class="match-teams">
-                        {m['home_team']}
-                        <span class="match-score">{score}</span>
-                        {m['away_team']}
+                    <div style="display:flex;align-items:center;justify-content:center;gap:1.5rem;">
+                        <div style="font-family:'Bebas Neue',sans-serif;font-size:1.6rem;letter-spacing:2px;color:#ffffff;text-align:right;flex:1;">
+                            {m['home_team']}
+                        </div>
+                        <div style="font-family:'JetBrains Mono',monospace;font-size:1.6rem;font-weight:500;color:#00d4ff;min-width:90px;text-align:center;line-height:1;position:relative;top:-2px;">
+                            {score}
+                        </div>
+                        <div style="font-family:'Bebas Neue',sans-serif;font-size:1.6rem;letter-spacing:2px;color:#ffffff;text-align:left;flex:1;">
+                            {m['away_team']}
+                        </div>
                     </div>
-                    <div class="match-meta">
-                        <span class="{status_cls}">{status_label}</span>
-                        &nbsp;·&nbsp; {m.get('date', '')}
-                        &nbsp;·&nbsp; {m.get('stage', '').replace('_', ' ')}
+                    <div style="display:flex;align-items:center;justify-content:center;gap:0.75rem;margin-top:0.5rem;">
+                        <span class="group-badge">{group_display(group_name)}</span>
+                        <span class="{status_cls}" style="font-family:'Inter',sans-serif;font-size:0.65rem;letter-spacing:1px;text-transform:uppercase;">{status_label}</span>
+                        <span style="color:#5a6070;font-family:'Inter',sans-serif;font-size:0.65rem;letter-spacing:1px;">{m.get('date', '')}</span>
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
