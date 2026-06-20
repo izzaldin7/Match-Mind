@@ -66,14 +66,15 @@ def get_today_matches(session=Depends(get_db)):
 
 @app.get("/matches/{match_id}/briefing")
 def get_match_briefing(match_id: int, session=Depends(get_db)):
+    from datetime import date
     match = session.query(Match).filter_by(match_id=match_id).first()
     if not match:
         raise HTTPException(status_code=404, detail="Match not found")
     if match.status in ("FINISHED", "Finished"):
-        raise HTTPException(
-            status_code=400,
-            detail="This match has already finished. Briefings are only available for upcoming matches. Try the /report endpoint instead."
-        )
+        raise HTTPException(status_code=400, detail="This match has already finished. Try the /report endpoint instead.")
+    if match.match_date != str(date.today()):
+        raise HTTPException(status_code=400, detail=f"Briefings are only available for today's matches. This match is scheduled for {match.match_date}.")
+
     try:
         data_used = build_match_briefing_context(
             home_team=match.home_team,
@@ -94,6 +95,7 @@ def get_match_briefing(match_id: int, session=Depends(get_db)):
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
     return {
         "match_id": match_id,
         "home_team": match.home_team,

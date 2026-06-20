@@ -35,6 +35,25 @@ TEAM_NAME_ALIASES = {
     "United States": "USA",
 }
 
+# ── In-memory cache ────────────────────────────────────────────────
+_cache = {
+    "world_cup_matches": None,
+    "match_details": {},
+    "match_id_lookup": {},
+    "head_to_head": {}
+}
+
+
+def _get_world_cup_matches():
+    if _cache["world_cup_matches"] is None:
+        _cache["world_cup_matches"] = fetch_world_cup_matches()
+    return _cache["world_cup_matches"]
+
+
+def _get_match_detail(highlightly_match_id):
+    if highlightly_match_id not in _cache["match_details"]:
+        _cache["match_details"][highlightly_match_id] = fetch_highlightly_match(highlightly_match_id)
+    return _cache["match_details"][highlightly_match_id]
 
 def get_highlightly_team_id(db_team_name):
     highlightly_name = TEAM_NAME_ALIASES.get(db_team_name, db_team_name)
@@ -71,6 +90,29 @@ def _first_present(*values):
     for value in values:
         if value not in (None, "", [], {}):
             return value
+    return None
+
+
+def _display_group_name(group_name):
+    if not group_name:
+        return "Unknown"
+    return group_name.replace("GROUP_", "Group ")
+
+
+def _highlightly_name(team_name):
+    return TEAM_NAME_ALIASES.get(team_name, team_name)
+
+
+def _names_match(left, right):
+    if not left or not right:
+        return False
+    return left == right or _highlightly_name(left) == _highlightly_name(right)
+
+
+def _team_name_matches_any(name, teams):
+    for team in teams:
+        if _names_match(name, team):
+            return team
     return None
 
 
@@ -116,8 +158,6 @@ def _score_pair(match):
 
     return None, None
 
-
-# ── Standings from DB ──────────────────────────────────────────────
 
 def get_group_standings(group_name, exclude_match_id=None):
     session = Session()
@@ -194,7 +234,7 @@ def format_standings_for_prompt(group_name, exclude_match_id=None):
             teams.add(m.away_team)
 
         if not teams:
-            return f"No data available for Group {group_name}."
+            return f"No data available for {_display_group_name(group_name)}."
 
         standings = [
             {"team": team, "played": 0, "won": 0, "drawn": 0, "lost": 0,
@@ -202,7 +242,7 @@ def format_standings_for_prompt(group_name, exclude_match_id=None):
             for team in sorted(teams)
         ]
 
-    lines = [f"Current Group {group_name} Standings:"]
+    lines = [f"Current {_display_group_name(group_name)} Standings:"]
     lines.append(f"{'Team':<25} {'P':>3} {'W':>3} {'D':>3} {'L':>3} {'GF':>4} {'GA':>4} {'GD':>4} {'Pts':>4}")
     lines.append("-" * 60)
 
@@ -215,15 +255,66 @@ def format_standings_for_prompt(group_name, exclude_match_id=None):
     return "\n".join(lines)
 
 
-# ── Highlightly: match lookup ──────────────────────────────────────
+def format_qualification_scenarios_for_prompt(group_name, home_team, away_team, exclude_match_id=None):
+    standings = get_group_standings(group_name, exclude_match_id=exclude_match_id)
+    if not standings:
+        return None
+
+    rows = {row["team"]: row for row in standings}
+    if home_team not in rows or away_team not in rows:
+        return None
+
+    lines = [f"Qualification picture for {_display_group_name(group_name)}:"]
+    lines.append("Tournament format: 12 groups, top 2 from each group qualify automatically. 8 best third-place teams also qualify.")
+
+    for team in (home_team, away_team):
+        row = rows[team]
+        played = row["played"]
+        remaining = 3 - played
+        pts = row["points"]
+        gd = row["gd"]
+        max_possible = pts + (remaining * 3)
+
+        # Qualification status logic
+        if pts >= 6:
+            # 6 points from 2 games — no third-place team can reach 6, mathematically through
+            status = "ALREADY QUALIFIED for the Round of 32 (top-two spot secured)"
+        elif pts == 4 and played == 2:
+            # 4 points, one game left — top 2 very likely, third-place route almost certain as backup
+            status = "likely qualified but not yet mathematically confirmed (strong position)"
+        elif max_possible < 4:
+            # Can't reach 4 points — third-place route effectively closed, top-two impossible
+            status = "ELIMINATED — cannot finish in top two or realistically claim a third-place spot"
+        elif max_possible < 6 and row.get("won", 0) == 0 and played == 2:
+            # Max 3 points, haven't won a game — third-place route only, very uncertain
+            status = "third-place route only — result here and results elsewhere must go their way"
+        else:
+            status = "qualification still to be decided"
+
+        lines.append(f"  {team}: {pts} pt(s), played {played}, GD {gd} — {status}.")
+
+        if "ALREADY QUALIFIED" not in status and "ELIMINATED" not in status:
+            win_pts = pts + 3
+            draw_pts = pts + 1
+            lines.append(f"    Win → {win_pts} pts. Draw → {draw_pts} pts. Loss → {pts} pts.")
+            if gd < 0:
+                lines.append(f"    Negative GD means margin of victory matters if it comes to tiebreakers.")
+
+    lines.append("  Note: third-place qualification depends on results across all 12 groups and cannot be modelled here.")
+    return "\n".join(lines)
+
 
 def find_highlightly_match_id(home_team, away_team, match_date):
-    matches = fetch_world_cup_matches()
+    cache_key = (home_team, away_team, match_date)
+    if cache_key in _cache["match_id_lookup"]:
+        return _cache["match_id_lookup"][cache_key]
+
+    matches = _get_world_cup_matches()
     if not matches:
         return None
 
-    home_alias = TEAM_NAME_ALIASES.get(home_team, home_team)
-    away_alias = TEAM_NAME_ALIASES.get(away_team, away_team)
+    home_alias = _highlightly_name(home_team)
+    away_alias = _highlightly_name(away_team)
 
     for m in matches:
         m_home = _team_name(m, "home")
@@ -231,12 +322,12 @@ def find_highlightly_match_id(home_team, away_team, match_date):
         m_date = _match_date(m)
 
         if m_home == home_alias and m_away == away_alias and m_date == match_date:
+            _cache["match_id_lookup"][cache_key] = m["id"]
             return m["id"]
 
+    _cache["match_id_lookup"][cache_key] = None
     return None
 
-
-# ── Highlightly: full match detail ────────────────────────────────
 
 def fetch_highlightly_match(highlightly_match_id):
     data = _hl_get(f"matches/{highlightly_match_id}")
@@ -246,8 +337,6 @@ def fetch_highlightly_match(highlightly_match_id):
         return data
     return None
 
-
-# ── Format helpers ─────────────────────────────────────────────────
 
 def _event_minute(event):
     minute = _first_present(
@@ -272,6 +361,15 @@ def _event_player(event, *keys):
     return None
 
 
+def _card_kind(event):
+    event_type = str(event.get("type", "")).lower()
+    if "red" in event_type:
+        return "Red Card"
+    if "yellow" in event_type:
+        return "Yellow Card"
+    return None
+
+
 def format_match_events(match_detail):
     events = _as_list(match_detail.get("events", []))
     if not events:
@@ -289,7 +387,12 @@ def format_match_events(match_detail):
             player = _event_player(g, "player", "scorer", "playerName")
             assist = _event_player(g, "assist", "assistedBy", "assistPlayer")
             assist_str = f" (assist: {assist})" if assist else ""
-            lines.append(f"  {_event_minute(g)} {player} ({team.get('name')}){assist_str} [{g.get('type')}]")
+            goal_type = str(g.get("type", ""))
+            team_name = team.get("name")
+            if goal_type.lower() == "own goal":
+                lines.append(f"  {_event_minute(g)} {player} [Own Goal credited to {team_name}]")
+            else:
+                lines.append(f"  {_event_minute(g)} {player} ({team_name}){assist_str} [{g.get('type')}]")
 
     if cards:
         lines.append("\nCards:")
@@ -391,8 +494,6 @@ def format_lineups(match_detail):
     return "\n".join(lines) if len(lines) > 1 else None
 
 
-# ── Main context builders ──────────────────────────────────────────
-
 def get_match_context(home_team, away_team, match_date, highlightly_match_id=None):
     if not highlightly_match_id:
         highlightly_match_id = find_highlightly_match_id(home_team, away_team, match_date)
@@ -400,7 +501,7 @@ def get_match_context(home_team, away_team, match_date, highlightly_match_id=Non
     if not highlightly_match_id:
         return None
 
-    match_detail = fetch_highlightly_match(highlightly_match_id)
+    match_detail = _get_match_detail(highlightly_match_id)
     if not match_detail:
         return None
 
@@ -433,19 +534,233 @@ def get_match_context(home_team, away_team, match_date, highlightly_match_id=Non
     return "\n".join(lines) if lines else None
 
 
+def _get_previous_group_matches_for_teams(home_team, away_team, match_date, group_name=None, exclude_match_id=None):
+    session = Session()
+    query = session.query(Match).filter(Match.status.in_(["FINISHED", "Finished"]))
+    if group_name:
+        query = query.filter(Match.group_name == group_name)
+    if match_date:
+        query = query.filter(Match.match_date < match_date)
+    if exclude_match_id:
+        query = query.filter(Match.match_id != exclude_match_id)
+    matches = query.all()
+    session.close()
+
+    teams = (home_team, away_team)
+    return [
+        match for match in matches
+        if match.home_team in teams or match.away_team in teams
+    ]
+
+
+def _extract_card_events(match_detail, target_teams):
+    events = _as_list(match_detail.get("events", []))
+    cards = []
+    for event in events:
+        kind = _card_kind(event)
+        if not kind:
+            continue
+        event_team = (event.get("team") or {}).get("name")
+        canonical_team = _team_name_matches_any(event_team, target_teams)
+        if not canonical_team:
+            continue
+        player = _event_player(event, "player", "playerName")
+        if not player:
+            continue
+        cards.append({
+            "team": canonical_team,
+            "player": player,
+            "kind": kind,
+            "minute": _event_minute(event),
+        })
+    return cards
+
+
+def get_discipline_watch(home_team, away_team, match_date, group_name=None, exclude_match_id=None):
+    target_teams = (home_team, away_team)
+    previous_matches = _get_previous_group_matches_for_teams(
+        home_team,
+        away_team,
+        match_date,
+        group_name=group_name,
+        exclude_match_id=exclude_match_id,
+    )
+    if not previous_matches:
+        return None
+
+    watch = {
+        team: {
+            "yellow_counts": {},
+            "yellow_details": {},
+            "suspended": {},
+        }
+        for team in target_teams
+    }
+    latest_match_by_team = {}
+    cards_by_match = {}
+
+    for match in sorted(previous_matches, key=lambda m: (m.match_date or "", m.match_id or 0)):
+        highlightly_id = find_highlightly_match_id(match.home_team, match.away_team, match.match_date)
+        if not highlightly_id:
+            continue
+        detail = _get_match_detail(highlightly_id)
+        if not detail:
+            continue
+
+        cards = _extract_card_events(detail, target_teams)
+        cards_by_match[match.match_id] = cards
+        for team in target_teams:
+            if match.home_team == team or match.away_team == team:
+                latest_match_by_team[team] = match
+
+        for card in cards:
+            team = card["team"]
+            player = card["player"]
+            if card["kind"] == "Yellow Card":
+                watch[team]["yellow_counts"][player] = watch[team]["yellow_counts"].get(player, 0) + 1
+                watch[team]["yellow_details"].setdefault(player, []).append(
+                    f"{card['minute']} vs {match.away_team if match.home_team == team else match.home_team}"
+                )
+
+    for team in target_teams:
+        latest = latest_match_by_team.get(team)
+        if not latest:
+            continue
+        latest_cards = cards_by_match.get(latest.match_id, [])
+        opponent = latest.away_team if latest.home_team == team else latest.home_team
+        for card in latest_cards:
+            if card["team"] != team:
+                continue
+            if card["kind"] == "Red Card":
+                watch[team]["suspended"][card["player"]] = f"red card vs {opponent}"
+
+        for player, count in watch[team]["yellow_counts"].items():
+            if count >= 2 and player not in watch[team]["suspended"]:
+                watch[team]["suspended"][player] = "two tournament yellow cards"
+
+    return watch
+
+
+def format_discipline_watch_for_prompt(home_team, away_team, match_date, group_name=None, exclude_match_id=None):
+    watch = get_discipline_watch(
+        home_team,
+        away_team,
+        match_date,
+        group_name=group_name,
+        exclude_match_id=exclude_match_id,
+    )
+    if not watch:
+        return None
+
+    lines = [
+        "Discipline watch based on previous group-stage matches:",
+        "Tournament rule used here: a red card means suspension for the next match; two tournament yellow cards mean suspension for the next match.",
+    ]
+    has_any = False
+
+    for team in (home_team, away_team):
+        team_watch = watch.get(team, {})
+        suspended = team_watch.get("suspended", {})
+        yellow_counts = team_watch.get("yellow_counts", {})
+
+        lines.append(f"  {team}:")
+        if suspended:
+            has_any = True
+            for player, reason in suspended.items():
+                lines.append(f"    Suspended: {player} ({reason})")
+        else:
+            lines.append("    Suspended: none found in available card data")
+
+        at_risk = [
+            player for player, count in yellow_counts.items()
+            if count == 1 and player not in suspended
+        ]
+        if at_risk:
+            has_any = True
+            lines.append(f"    One yellow from suspension: {', '.join(sorted(at_risk))}")
+        else:
+            lines.append("    One yellow from suspension: none found in available card data")
+
+    return "\n".join(lines) if has_any else None
+
+
+def format_recent_match_context_for_prompt(home_team, away_team, match_date, group_name=None, exclude_match_id=None):
+    previous_matches = _get_previous_group_matches_for_teams(
+        home_team,
+        away_team,
+        match_date,
+        group_name=group_name,
+        exclude_match_id=exclude_match_id,
+    )
+    if not previous_matches:
+        return None
+
+    latest_by_team = {}
+    for match in sorted(previous_matches, key=lambda m: (m.match_date or "", m.match_id or 0)):
+        for team in (home_team, away_team):
+            if match.home_team == team or match.away_team == team:
+                latest_by_team[team] = match
+
+    lines = ["Most recent group match for each team:"]
+    found = False
+    for team in (home_team, away_team):
+        match = latest_by_team.get(team)
+        if not match:
+            continue
+        opponent = match.away_team if match.home_team == team else match.home_team
+        team_score = match.home_score if match.home_team == team else match.away_score
+        opp_score = match.away_score if match.home_team == team else match.home_score
+        if team_score is None or opp_score is None:
+            result_text = f"vs {opponent}, final score unavailable"
+        elif team_score > opp_score:
+            result_text = f"beat {opponent} {team_score}-{opp_score}"
+        elif team_score < opp_score:
+            result_text = f"lost to {opponent} {team_score}-{opp_score}"
+        else:
+            result_text = f"drew with {opponent} {team_score}-{opp_score}"
+        lines.append(f"  {team}: {result_text} on {match.match_date}.")
+        found = True
+
+    return "\n".join(lines) if found else None
+
+
 def get_head_to_head(home_team, away_team):
+    from datetime import date as date_today
+    cache_key = (home_team, away_team)
+    reverse_key = (away_team, home_team)
+
+    if cache_key in _cache["head_to_head"]:
+        return _cache["head_to_head"][cache_key]
+    if reverse_key in _cache["head_to_head"]:
+        return _cache["head_to_head"][reverse_key]
+
     home_id = get_highlightly_team_id(home_team)
     away_id = get_highlightly_team_id(away_team)
 
     if not home_id or not away_id:
+        _cache["head_to_head"][cache_key] = None
         return None
 
     matches = _as_list(_hl_get("head-2-head", {"teamIdOne": home_id, "teamIdTwo": away_id}))
+
     if not matches:
+        _cache["head_to_head"][cache_key] = None
+        return None
+
+    today = str(date_today.today())
+    finished = [
+        m for m in matches
+        if _match_status(m) in ("Finished", "FINISHED")
+        and _match_date(m) is not None
+        and _match_date(m) < today
+    ]
+
+    if not finished:
+        _cache["head_to_head"][cache_key] = None
         return None
 
     lines = [f"Head-to-head history between {home_team} and {away_team}:"]
-    for m in matches[:5]:
+    for m in finished[:5]:
         m_home = _team_name(m, "home")
         m_away = _team_name(m, "away")
         score = (m.get("state") or {}).get("score", {}).get("current", "N/A")
@@ -453,7 +768,9 @@ def get_head_to_head(home_team, away_team):
         round_name = m.get("round", "")
         lines.append(f"  {date} ({round_name}): {m_home} {score} {m_away}")
 
-    return "\n".join(lines) if len(lines) > 1 else None
+    result = "\n".join(lines) if len(lines) > 1 else None
+    _cache["head_to_h2h"][cache_key] = result
+    return result
 
 
 def get_team_tournament_form(team_name, exclude_match_id=None):
@@ -461,15 +778,14 @@ def get_team_tournament_form(team_name, exclude_match_id=None):
     if not team_id:
         return None
 
-    all_matches = fetch_world_cup_matches()
+    all_matches = _get_world_cup_matches()
     if not all_matches:
         return None
 
-    team_alias = TEAM_NAME_ALIASES.get(team_name, team_name)
+    team_alias = _highlightly_name(team_name)
     finished_matches = [
         m for m in all_matches
         if _match_status(m) in ("FINISHED", "Finished")
-        and m.get("id") != exclude_match_id
         and (
             _team_name(m, "home") == team_alias or
             _team_name(m, "away") == team_alias or
@@ -483,24 +799,27 @@ def get_team_tournament_form(team_name, exclude_match_id=None):
 
     scorers = {}
     for m in finished_matches:
-        detail = fetch_highlightly_match(m["id"])
+        detail = _get_match_detail(m["id"])
         if not detail:
             continue
-        for e in detail.get("events", []):
+        for e in _as_list(detail.get("events", [])):
             event_team_name = (e.get("team") or {}).get("name")
             if event_team_name not in (team_name, team_alias):
                 continue
-            if e.get("type") in ("Goal", "Penalty") and e.get("player"):
-                scorers.setdefault(e["player"], {"goals": 0, "assists": 0})
-                scorers[e["player"]]["goals"] += 1
-                if e.get("assist"):
-                    scorers.setdefault(e["assist"], {"goals": 0, "assists": 0})
-                    scorers[e["assist"]]["assists"] += 1
+            event_type = str(e.get("type", ""))
+            player = _event_player(e, "player", "scorer", "playerName")
+            assist = _event_player(e, "assist", "assistedBy", "assistPlayer")
+            if event_type in ("Goal", "Penalty") and player:
+                scorers.setdefault(player, {"goals": 0, "assists": 0})
+                scorers[player]["goals"] += 1
+                if assist:
+                    scorers.setdefault(assist, {"goals": 0, "assists": 0})
+                    scorers[assist]["assists"] += 1
 
     if not scorers:
         return None
 
-    lines = [f"{team_name} - goal involvements so far this tournament:"]
+    lines = [f"{team_name} - cumulative goal involvements across all tournament matches so far (not match-specific):"]
     for player, tally in scorers.items():
         parts = []
         if tally["goals"]:
