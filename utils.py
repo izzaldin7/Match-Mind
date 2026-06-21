@@ -410,14 +410,14 @@ def format_match_events(match_detail):
 
     if subs:
         lines.append("\nSubstitutions:")
-        for s in subs:
-            team = s.get("team") or {}
-            player_on = _event_player(s, "player", "playerIn", "in")
-            player_off = _event_player(s, "substituted", "playerOut", "out")
-            if player_off:
-                lines.append(f"  {_event_minute(s)} {player_on} replaces {player_off} ({team.get('name')})")
-            else:
-                lines.append(f"  {_event_minute(s)} {player_on} ({team.get('name')})")
+    for s in subs:
+        team = s.get("team") or {}
+        player_on = _event_player(s, "substituted", "playerIn", "in")
+        player_off = _event_player(s, "player", "playerOut", "out")
+        if player_off:
+            lines.append(f"  {_event_minute(s)} SUB ON: {player_on} / SUB OFF: {player_off} ({team.get('name')})")
+        else:
+            lines.append(f"  {_event_minute(s)} SUB ON: {player_on} ({team.get('name')})")
 
     return "\n".join(lines) if lines else None
 
