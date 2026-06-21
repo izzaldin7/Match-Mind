@@ -73,8 +73,8 @@ st.markdown("""
         background: #0f1525;
         border: 1px solid #1a2035;
         border-radius: 4px;
-        padding: 1.25rem 1.5rem;
-        margin-bottom: 0.5rem;
+        padding: 0.75rem 1.5rem;
+        margin-bottom: 0.35rem;
         transition: border-color 0.2s;
     }
     .match-card:hover { border-color: #FFD70030; }
@@ -220,6 +220,29 @@ st.markdown("""
         border-bottom: 1px solid #1a2035;
         margin-bottom: 0.25rem;
     }
+            
+    div[data-testid="stHorizontalBlock"] {
+        gap: 0 !important;
+        margin-top: -0.5rem !important;
+        margin-bottom: 0.75rem !important;
+    }
+    div[data-testid="stHorizontalBlock"] div[data-testid="stButton"] button {
+        border-top: none !important;
+        border-top-left-radius: 0 !important;
+        border-top-right-radius: 0 !important;
+        width: auto !important;
+        padding: 0.3rem 1rem !important;
+        font-size: 0.65rem !important;
+        color: #5a6070 !important;
+        border-color: #1a2035 !important;
+    }
+    div[data-testid="stHorizontalBlock"] div[data-testeid="stButton"] button:hover {
+    color: #FFD700 !important;
+    border-color: #FFD70040 !important;
+    }
+    div[data-testid="column"] + div[data-testid="column"] {
+    padding-left: 1rem !important;
+    }
     .s-team { flex: 3; color: #e8eaf0; font-weight: 600; }
     .s-team-gold { flex: 3; color: #FFD700; font-weight: 600; }
     .s-num { flex: 1; text-align: center; color: #c8cad4; }
@@ -293,11 +316,11 @@ def render_standings(standings):
         st.markdown('<div style="color:#5a6070;font-size:0.8rem;padding:0.5rem 0;">No matches played yet.</div>', unsafe_allow_html=True)
         return
 
-    header = '<div class="standings-row standings-header"><div class="s-team">Team</div><div class="s-num">P</div><div class="s-num">W</div><div class="s-num">D</div><div class="s-num">L</div><div class="s-num">GF</div><div class="s-num">GA</div><div class="s-num">GD</div><div class="s-pts">Pts</div></div>'
+    header = '<div class="standings-row standings-header"><div class="s-team">Team</div><div class="s-num">P</div><div class="s-num">W</div><div class="s-num">D</div><div class="s-num">L</div><div class="s-num">GD</div><div class="s-pts">Pts</div></div>'
     rows = ""
     for i, row in enumerate(standings):
         team_cls = "s-team-gold" if i < 2 else "s-team"
-        rows += f'<div class="standings-row"><div class="{team_cls}">{row["team"]}</div><div class="s-num">{row["played"]}</div><div class="s-num">{row["won"]}</div><div class="s-num">{row["drawn"]}</div><div class="s-num">{row["lost"]}</div><div class="s-num">{row["gf"]}</div><div class="s-num">{row["ga"]}</div><div class="s-num">{row["gd"]}</div><div class="s-pts">{row["points"]}</div></div>'
+        rows += f'<div class="standings-row"><div class="{team_cls}">{row["team"]}</div><div class="s-num">{row["played"]}</div><div class="s-num">{row["won"]}</div><div class="s-num">{row["drawn"]}</div><div class="s-num">{row["lost"]}</div><div class="s-num">{row["gd"]}</div><div class="s-pts">{row["points"]}</div></div>'
 
     st.markdown(f'<div class="standings-wrap">{header}{rows}</div>', unsafe_allow_html=True)
 
@@ -307,7 +330,11 @@ def render_match_card(m, key_prefix=""):
     score = format_score(m.get("home_score"), m.get("away_score"), m["status"])
     grp = group_display(m.get("group", ""))
     group_badge_html = f'<span class="group-badge">{grp}</span>' if grp else ""
-    date_html = f'<span style="color:#5a6070;font-family:Inter,sans-serif;font-size:0.65rem;">{m.get("date","")}</span>' if m.get("date") else ""
+    date_val = m.get("date") or ""
+    date_html = f'<span style="color:#5a6070;font-family:Inter,sans-serif;font-size:0.65rem;">{date_val}</span>' if date_val else ""
+    kickoff_val = m.get("kick_off_time") or ""
+    kickoff_html = f'<span style="color:#5a6070;font-family:Inter,sans-serif;font-size:0.65rem;">⏱ {kickoff_val}</span>' if kickoff_val else ""
+    meta_row = f'{group_badge_html}<span class="{status_cls}" style="font-family:\'Inter\',sans-serif;font-size:0.65rem;letter-spacing:1px;text-transform:uppercase;">{status_label}</span>{date_html}{kickoff_html}'
     is_finished = m["status"].upper() in ("FINISHED",)
     is_upcoming = m["status"].upper() not in ("FINISHED", "IN_PLAY", "PAUSED", "HALFTIME")
     mid = m['match_id']
@@ -318,14 +345,12 @@ def render_match_card(m, key_prefix=""):
     st.markdown(f"""
 <div class="match-card {card_class}">
     <div style="display:flex;align-items:center;justify-content:center;gap:1.5rem;">
-        <div style="font-family:'Bebas Neue',sans-serif;font-size:1.6rem;letter-spacing:2px;color:#ffffff;text-align:right;flex:1;">{m['home_team']}</div>
-        <div style="font-family:'JetBrains Mono',monospace;font-size:1.6rem;font-weight:500;color:#FFD700;min-width:90px;text-align:center;line-height:1;position:relative;top:-2px;">{score}</div>
-        <div style="font-family:'Bebas Neue',sans-serif;font-size:1.6rem;letter-spacing:2px;color:#ffffff;text-align:left;flex:1;">{m['away_team']}</div>
+        <div style="font-family:'Bebas Neue',sans-serif;font-size:1.3rem;letter-spacing:2px;color:#ffffff;text-align:right;flex:1;">{m['home_team']}</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:1.3rem;font-weight:500;color:#FFD700;min-width:90px;text-align:center;line-height:1;position:relative;top:-2px;">{score}</div>
+        <div style="font-family:'Bebas Neue',sans-serif;font-size:1.3rem;letter-spacing:2px;color:#ffffff;text-align:left;flex:1;">{m['away_team']}</div>
     </div>
     <div style="display:flex;align-items:center;justify-content:center;gap:0.75rem;margin-top:0.5rem;">
-        {group_badge_html}
-        <span class="{status_cls}" style="font-family:'Inter',sans-serif;font-size:0.65rem;letter-spacing:1px;text-transform:uppercase;">{status_label}</span>
-        {date_html}
+        {meta_row}
     </div>
 </div>
 """, unsafe_allow_html=True)
@@ -439,10 +464,10 @@ with tab2:
             else:
                 knockout.append(m)
 
-        col1, col2 = st.columns([2, 1])
-        with col1:
+        filter_col1, filter_col2 = st.columns([3, 1])
+        with filter_col1:
             selected_group = st.selectbox("Filter by group", ["All Groups"] + sorted(groups.keys()), label_visibility="collapsed")
-        with col2:
+        with filter_col2:
             status_filter = st.selectbox("Filter by status", ["All", "Upcoming", "Finished"], label_visibility="collapsed")
 
         st.markdown("<br>", unsafe_allow_html=True)
@@ -460,7 +485,7 @@ with tab2:
                 return
 
             st.markdown(f'<div class="section-label">{group_display(group_name)}</div>', unsafe_allow_html=True)
-            left_col, right_col = st.columns([3, 2])
+            left_col, gap_col, right_col = st.columns([3, 0.2, 2])
 
             with left_col:
                 st.markdown('<div class="section-label">Matches</div>', unsafe_allow_html=True)
@@ -482,7 +507,9 @@ with tab2:
             for g in sorted(groups.keys()):
                 render_group_section(g, groups[g])
             if knockout:
-                render_group_section("Knockout Stage", knockout)
+                real_knockout = [m for m in knockout if m.get("home_team") and m.get("away_team")]
+                if real_knockout:
+                    render_group_section("Knockout Stage", real_knockout)
         else:
             render_group_section(selected_group, groups.get(selected_group, []))
 
@@ -502,7 +529,7 @@ with tab3:
         if not finished_matches:
             st.markdown('<div style="color:#5a6070;font-size:0.85rem;padding:1rem 0;">No finished matches yet.</div>', unsafe_allow_html=True)
         else:
-            finished_matches.sort(key=lambda x: x.get("date", ""), reverse=True)
+            finished_matches.sort(key=lambda x: (x.get("date", ""), x.get("kick_off_time", "")), reverse=True)
             by_date = {}
             for m in finished_matches:
                 d = m.get("date", "Unknown")

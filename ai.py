@@ -176,25 +176,49 @@ def generate_match_briefing(home_team, away_team, match_date, stage, group=None,
       scenarios directly: if a team is already qualified, say so and explain
       they are playing for group position. If a team is eliminated, say so.
       If still alive, explain exactly what they need from this match.
+      Do not state what a win, draw, or loss is worth in points — this is
+      obvious to any football fan and adds no value. Focus instead on what
+      the result means narratively — pressure, opportunity, must-win situation,
+      comfortable position, etc.
     - A recent form paragraph based only on the recent match context provided.
-      Reference the most recent result from recent match context. When mentioning
-      goal involvements, make clear these are tournament totals across all games,
-      not goals scored in the most recent match specifically. Never say or imply
-      a player scored in a specific match unless that match's scorers are explicitly
-      listed in recent match context.
-    - A discipline paragraph if suspension or yellow-card risk data is available.
-      Mention suspended players and players one booking from suspension by name.
-      Do not invent any availability news beyond this data.
+      Reference the most recent result for each team. If tournament goal
+      involvements are listed above, YOU MUST name the players involved and
+      their tallies — this is mandatory, not optional. Make clear these are
+      tournament totals, not match-specific. Never imply a player scored in
+      a specific match unless explicitly stated.
+    - A discipline paragraph — this is MANDATORY if discipline watch data is
+      available above. If it is available, you must name every suspended player
+      and every player one yellow card from suspension, for both teams. Do not
+      summarise vaguely — name them specifically. If discipline data is not
+      available, skip this paragraph entirely without mentioning its absence.
     - Any relevant historical context between these teams from the head-to-head
-      data, if present.
+      data, if present. If head-to-head data is not available, do not say
+      "no data is available" or "we cannot assess this". Instead write a single
+      natural sentence acknowledging this is a rare or first meeting — e.g.
+      "These sides rarely cross paths on the international stage, making this
+      a genuinely fresh encounter." Don't use this sameline for all briefing.
+      Vary the phrasing, keep it brief, and move on.
     - A brief tactical outlook tied to the standings, recent match context, and
       player availability.
-    - A considered prediction with a clear reason behind it.
+    - A considered prediction with a clear reason behind it. The prediction
+      must be based on the quality and context of the data — form, discipline,
+      goal threat, qualification pressure. Do not predict a draw simply because
+      both teams drew their previous match, or because the standings are level.
+      That is lazy reasoning. A draw is a valid prediction only if the data
+      genuinely supports equal strength and neither team having a clear edge.
+      State the reasoning explicitly and make it specific to these two teams.
 
     ABSOLUTE RULES - these cannot be broken under any circumstances:
     - Your briefing must be driven by the AVAILABLE DATA above. Use all available
       sections directly and specifically.
-    - If a category says "Not available", do not invent it. Skip that section.
+    - If a category says "Not available", do not invent it. Skip that section
+      entirely — do not write a sentence acknowledging its absence either.
+    - If goal involvements, discipline watch, and recent match context are all
+      "Not available", this is a matchday 1 fixture where neither team has played
+      yet. In this case, skip the recent form and discipline paragraphs entirely.
+      Do not write phrases like "no prior data is available" or "both teams are
+      yet to play" — simply omit those sections and focus on standings, h2h
+      history, tactical outlook, and prediction.
     - Only mention player names that explicitly appear in the data provided above.
       Do not recall, assume, or invent any player names from your training data.
     - Do not invent injuries, suspensions, tactical systems, lineups, or
@@ -202,7 +226,13 @@ def generate_match_briefing(home_team, away_team, match_date, stage, group=None,
     - Discipline can only be discussed from the discipline watch block. If that
       block is not available, do not mention cards, suspensions, or suspension risk.
     - No exclamation marks. Confident, assured tone throughout.
-    - Keep it under 280 words.
+    - Write between 400-500 words. Use clear paragraph breaks between
+      each section — each section must be its own paragraph.
+    - Avoid generic filler phrases such as "both teams will look to build
+      on their momentum", "this will be a crucial encounter", "every point
+      counts", "regroup and reassess", or any variation of these. Every
+      sentence must say something specific and grounded in the data provided.
+      If you cannot say something specific, say nothing.
     """
 
     response = get_groq_client().chat.completions.create(
@@ -269,8 +299,12 @@ def generate_post_match_report(home_team, away_team, home_score, away_score, sta
     - Do not characterize the disciplinary tone of the match beyond what the
       data explicitly shows.
     - No exclamation marks. Confident, measured tone throughout.
-    - If detailed match data is available, write 500-750 words.
+    - If detailed match data is available, write 500-700 words.
       If match data is not available, keep it under 250 words.
+    - Avoid generic filler phrases such as "regroup and reassess",
+      "build on this momentum", "crucial encounter", "every point counts",
+      or any variation of stock sports journalism clichés. Every sentence
+      must say something specific and grounded in the data above.
     """
 
     response = get_groq_client().chat.completions.create(

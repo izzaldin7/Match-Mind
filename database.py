@@ -19,6 +19,7 @@ class Match(Base):
     away_score = Column(Integer, nullable=True)
     stage = Column(String)
     group_name = Column(String, nullable=True)
+    kick_off_time = Column(String, nullable=True)
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///matchmind.db")
 connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}

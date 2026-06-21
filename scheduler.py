@@ -34,6 +34,7 @@ def refresh_match_data():
                 existing.status = match['status']
                 existing.home_score = match['score']['fullTime']['home']
                 existing.away_score = match['score']['fullTime']['away']
+                existing.kick_off_time = match['utcDate'][11:16] + " UTC"
             else:
                 new_match = Match(
                     match_id=match['id'],
@@ -44,7 +45,8 @@ def refresh_match_data():
                     home_score=match['score']['fullTime']['home'],
                     away_score=match['score']['fullTime']['away'],
                     stage=match['stage'],
-                    group_name=match.get('group')
+                    group_name=match.get('group'),
+                    kick_off_time=match['utcDate'][11:16] + " UTC"
                 )
                 session.add(new_match)
 
@@ -59,11 +61,11 @@ def refresh_match_data():
 
 def start_scheduler():
     scheduler = BackgroundScheduler()
-    scheduler.add_job(refresh_match_data, 'interval', minutes=5)
+    scheduler.add_job(refresh_match_data, 'interval', minutes=30)
     scheduler.start()
     try:
         refresh_match_data()
     except Exception as e:
         print(f"Initial refresh failed, will retry on next scheduled interval: {e}")
-    print("Scheduler started - refreshing every 5 minutes.")
+    print("Scheduler started - refreshing every 30 minutes.")
     return scheduler

@@ -42,7 +42,8 @@ def get_matches(session=Depends(get_db)):
             "home_score": m.home_score,
             "away_score": m.away_score,
             "stage": m.stage,
-            "group": m.group_name
+            "group": m.group_name,
+            "kick_off_time": m.kick_off_time
         }
         for m in matches
     ]
@@ -60,7 +61,8 @@ def get_today_matches(session=Depends(get_db)):
             "status": m.status,
             "home_score": m.home_score,
             "away_score": m.away_score,
-            "group": m.group_name
+            "group": m.group_name,
+            "kick_off_time": m.kick_off_time
         }
         for m in matches
     ]
