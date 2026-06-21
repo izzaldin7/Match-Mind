@@ -94,11 +94,12 @@ def build_post_match_context(home_team, away_team, home_score, away_score, stage
         "match_data": None
     }
 
-    if group:
-        context["standings"] = format_standings_for_prompt(group)
+    if group and match_date:
+        # Use up_to_date to show standings as they were on the day of this match
+        context["standings"] = format_standings_for_prompt(group, up_to_date=match_date)
 
         qualification_notes = []
-        standings_data = get_group_standings(group)
+        standings_data = get_group_standings(group, up_to_date=match_date)
         if standings_data:
             for team_row in standings_data:
                 team = team_row["team"]
@@ -117,10 +118,10 @@ def build_post_match_context(home_team, away_team, home_score, away_score, stage
                     )
         context["qualification_notes"] = "\n".join(qualification_notes) if qualification_notes else None
 
+    elif group:
+        context["standings"] = format_standings_for_prompt(group)
+
     if match_date:
-        from utils import _cache
-        cache_key = (home_team, away_team, match_date)
-        _cache["match_id_lookup"].pop(cache_key, None)
         context["match_data"] = get_match_context(
             home_team,
             away_team,
@@ -196,8 +197,7 @@ def generate_match_briefing(home_team, away_team, match_date, stage, group=None,
       "no data is available" or "we cannot assess this". Instead write a single
       natural sentence acknowledging this is a rare or first meeting — e.g.
       "These sides rarely cross paths on the international stage, making this
-      a genuinely fresh encounter." Don't use this sameline for all briefing.
-      Vary the phrasing, keep it brief, and move on.
+      a genuinely fresh encounter." Vary the phrasing, keep it brief, and move on.
     - A brief tactical outlook tied to the standings, recent match context, and
       player availability.
     - A considered prediction with a clear reason behind it. The prediction
@@ -305,6 +305,8 @@ def generate_post_match_report(home_team, away_team, home_score, away_score, sta
       "build on this momentum", "crucial encounter", "every point counts",
       or any variation of stock sports journalism clichés. Every sentence
       must say something specific and grounded in the data above.
+    - In the substitutions data, "SUB ON" means the player entered the pitch,
+      "SUB OFF" means the player left the pitch. Never reverse this.
     """
 
     response = get_groq_client().chat.completions.create(

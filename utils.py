@@ -58,9 +58,15 @@ def _get_world_cup_matches():
 
 
 def _get_match_detail(highlightly_match_id):
-    if highlightly_match_id not in _cache["match_details"]:
-        _cache["match_details"][highlightly_match_id] = fetch_highlightly_match(highlightly_match_id)
-    return _cache["match_details"][highlightly_match_id]
+    if highlightly_match_id in _cache["match_details"]:
+        cached = _cache["match_details"][highlightly_match_id]
+        if cached is not None:
+            return cached
+    result = fetch_highlightly_match(highlightly_match_id)
+    if result is not None:
+        _cache["match_details"][highlightly_match_id] = result
+    return result
+
 
 def get_highlightly_team_id(db_team_name):
     highlightly_name = TEAM_NAME_ALIASES.get(db_team_name, db_team_name)
@@ -74,7 +80,10 @@ def _hl_get(endpoint, params=None):
     try:
         url = f"{HIGHLIGHTLY_BASE}/{endpoint}"
         response = requests.get(url, headers=HIGHLIGHTLY_HEADERS, params=params, timeout=10)
-        if response.status_code != 200:
+        if response.status_code == 429:
+            print("⚠️  HIGHLIGHTLY RATE LIMIT HIT — daily quota exhausted. Match data will be unavailable until midnight reset.")
+            return None
+        elif response.status_code != 200:
             print(f"Highlightly request failed [{endpoint}]: {response.status_code}")
             return None
         return response.json()
@@ -166,7 +175,9 @@ def _score_pair(match):
     return None, None
 
 
-def get_group_standings(group_name, exclude_match_id=None):
+# ── Standings from DB ──────────────────────────────────────────────
+
+def get_group_standings(group_name, exclude_match_id=None, up_to_date=None):
     session = Session()
     query = session.query(Match).filter(
         Match.group_name == group_name,
@@ -174,6 +185,8 @@ def get_group_standings(group_name, exclude_match_id=None):
     )
     if exclude_match_id:
         query = query.filter(Match.match_id != exclude_match_id)
+    if up_to_date:
+        query = query.filter(Match.match_date <= up_to_date)
     matches = query.all()
     session.close()
 
@@ -224,14 +237,16 @@ def get_group_standings(group_name, exclude_match_id=None):
     return sorted(standings.values(), key=lambda x: (x["points"], x["gd"], x["gf"]), reverse=True)
 
 
-def format_standings_for_prompt(group_name, exclude_match_id=None):
-    standings = get_group_standings(group_name, exclude_match_id=exclude_match_id)
+def format_standings_for_prompt(group_name, exclude_match_id=None, up_to_date=None):
+    standings = get_group_standings(group_name, exclude_match_id=exclude_match_id, up_to_date=up_to_date)
 
     if not standings:
         session = Session()
         query = session.query(Match).filter_by(group_name=group_name)
         if exclude_match_id:
             query = query.filter(Match.match_id != exclude_match_id)
+        if up_to_date:
+            query = query.filter(Match.match_date <= up_to_date)
         matches = query.all()
         session.close()
 
@@ -282,18 +297,13 @@ def format_qualification_scenarios_for_prompt(group_name, home_team, away_team, 
         gd = row["gd"]
         max_possible = pts + (remaining * 3)
 
-        # Qualification status logic
         if pts >= 6:
-            # 6 points from 2 games — no third-place team can reach 6, mathematically through
             status = "ALREADY QUALIFIED for the Round of 32 (top-two spot secured)"
         elif pts == 4 and played == 2:
-            # 4 points, one game left — top 2 very likely, third-place route almost certain as backup
             status = "likely qualified but not yet mathematically confirmed (strong position)"
         elif max_possible < 4:
-            # Can't reach 4 points — third-place route effectively closed, top-two impossible
             status = "ELIMINATED — cannot finish in top two or realistically claim a third-place spot"
         elif max_possible < 6 and row.get("won", 0) == 0 and played == 2:
-            # Max 3 points, haven't won a game — third-place route only, very uncertain
             status = "third-place route only — result here and results elsewhere must go their way"
         else:
             status = "qualification still to be decided"
@@ -303,13 +313,15 @@ def format_qualification_scenarios_for_prompt(group_name, home_team, away_team, 
         if "ALREADY QUALIFIED" not in status and "ELIMINATED" not in status:
             win_pts = pts + 3
             draw_pts = pts + 1
-            lines.append(f"    Win → {win_pts} pts. Draw → {draw_pts} pts. Loss → {pts} pts.")
+            lines.append(f"    Win -> {win_pts} pts. Draw -> {draw_pts} pts. Loss -> {pts} pts.")
             if gd < 0:
                 lines.append(f"    Negative GD means margin of victory matters if it comes to tiebreakers.")
 
     lines.append("  Note: third-place qualification depends on results across all 12 groups and cannot be modelled here.")
     return "\n".join(lines)
 
+
+# ── Highlightly: match lookup ──────────────────────────────────────
 
 def find_highlightly_match_id(home_team, away_team, match_date):
     cache_key = (home_team, away_team, match_date)
@@ -344,6 +356,8 @@ def fetch_highlightly_match(highlightly_match_id):
         return data
     return None
 
+
+# ── Format helpers ─────────────────────────────────────────────────
 
 def _event_minute(event):
     minute = _first_present(
@@ -410,14 +424,14 @@ def format_match_events(match_detail):
 
     if subs:
         lines.append("\nSubstitutions:")
-    for s in subs:
-        team = s.get("team") or {}
-        player_on = _event_player(s, "substituted", "playerIn", "in")
-        player_off = _event_player(s, "player", "playerOut", "out")
-        if player_off:
-            lines.append(f"  {_event_minute(s)} SUB ON: {player_on} / SUB OFF: {player_off} ({team.get('name')})")
-        else:
-            lines.append(f"  {_event_minute(s)} SUB ON: {player_on} ({team.get('name')})")
+        for s in subs:
+            team = s.get("team") or {}
+            player_on = _event_player(s, "substituted", "playerIn", "in")
+            player_off = _event_player(s, "player", "playerOut", "out")
+            if player_off:
+                lines.append(f"  {_event_minute(s)} SUB ON: {player_on} / SUB OFF: {player_off} ({team.get('name')})")
+            else:
+                lines.append(f"  {_event_minute(s)} SUB ON: {player_on} ({team.get('name')})")
 
     return "\n".join(lines) if lines else None
 
@@ -541,6 +555,8 @@ def get_match_context(home_team, away_team, match_date, highlightly_match_id=Non
     return "\n".join(lines) if lines else None
 
 
+# ── Previous match helpers ─────────────────────────────────────────
+
 def _get_previous_group_matches_for_teams(home_team, away_team, match_date, group_name=None, exclude_match_id=None):
     session = Session()
     query = session.query(Match).filter(Match.status.in_(["FINISHED", "Finished"]))
@@ -586,9 +602,7 @@ def _extract_card_events(match_detail, target_teams):
 def get_discipline_watch(home_team, away_team, match_date, group_name=None, exclude_match_id=None):
     target_teams = (home_team, away_team)
     previous_matches = _get_previous_group_matches_for_teams(
-        home_team,
-        away_team,
-        match_date,
+        home_team, away_team, match_date,
         group_name=group_name,
         exclude_match_id=exclude_match_id,
     )
@@ -596,11 +610,7 @@ def get_discipline_watch(home_team, away_team, match_date, group_name=None, excl
         return None
 
     watch = {
-        team: {
-            "yellow_counts": {},
-            "yellow_details": {},
-            "suspended": {},
-        }
+        team: {"yellow_counts": {}, "yellow_details": {}, "suspended": {}}
         for team in target_teams
     }
     latest_match_by_team = {}
@@ -650,9 +660,7 @@ def get_discipline_watch(home_team, away_team, match_date, group_name=None, excl
 
 def format_discipline_watch_for_prompt(home_team, away_team, match_date, group_name=None, exclude_match_id=None):
     watch = get_discipline_watch(
-        home_team,
-        away_team,
-        match_date,
+        home_team, away_team, match_date,
         group_name=group_name,
         exclude_match_id=exclude_match_id,
     )
@@ -693,9 +701,7 @@ def format_discipline_watch_for_prompt(home_team, away_team, match_date, group_n
 
 def format_recent_match_context_for_prompt(home_team, away_team, match_date, group_name=None, exclude_match_id=None):
     previous_matches = _get_previous_group_matches_for_teams(
-        home_team,
-        away_team,
-        match_date,
+        home_team, away_team, match_date,
         group_name=group_name,
         exclude_match_id=exclude_match_id,
     )
