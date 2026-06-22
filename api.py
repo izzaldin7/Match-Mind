@@ -50,9 +50,12 @@ def get_matches(session=Depends(get_db)):
 
 @app.get("/matches/today")
 def get_today_matches(session=Depends(get_db)):
-    from datetime import date
-    today = str(date.today())
-    matches = session.query(Match).filter_by(match_date=today).all()
+    from datetime import datetime, timezone
+    now_utc = datetime.now(timezone.utc)
+    today = str(now_utc.date())
+    matches = session.query(Match).filter(
+        Match.match_date.in_([today])
+    ).all()
     return [
         {
             "match_id": m.match_id,

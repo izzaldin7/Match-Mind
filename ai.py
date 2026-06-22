@@ -9,7 +9,8 @@ from utils import (
     get_team_tournament_form,
     get_group_standings,
     format_discipline_watch_for_prompt,
-    format_recent_match_context_for_prompt
+    format_recent_match_context_for_prompt,
+    format_recent_standout_performers_for_prompt
 )
 
 load_dotenv()
@@ -39,7 +40,8 @@ def build_match_briefing_context(home_team, away_team, match_date, stage, group=
         "goal_involvements": None,
         "head_to_head": None,
         "discipline_watch": None,
-        "recent_match_context": None
+        "recent_match_context": None,
+        "recent_standout_performers": None
     }
 
     if group:
@@ -63,6 +65,12 @@ def build_match_briefing_context(home_team, away_team, match_date, stage, group=
     )
 
     context["recent_match_context"] = format_recent_match_context_for_prompt(
+        home_team, away_team, match_date,
+        group_name=group,
+        exclude_match_id=match_id
+    )
+
+    context["recent_standout_performers"] = format_recent_standout_performers_for_prompt(
         home_team, away_team, match_date,
         group_name=group,
         exclude_match_id=match_id
@@ -129,6 +137,14 @@ def build_post_match_context(home_team, away_team, home_score, away_score, stage
             highlightly_match_id=None
         )
 
+    context["box_score"] = None
+    if match_date:
+        from utils import find_highlightly_match_id, fetch_box_score, format_box_score_for_prompt
+        highlightly_id = find_highlightly_match_id(home_team, away_team, match_date)
+        if highlightly_id:
+            box_score_data = fetch_box_score(highlightly_id)
+            context["box_score"] = format_box_score_for_prompt(box_score_data, home_team, away_team)
+
     return context
 
 
@@ -161,6 +177,10 @@ def generate_match_briefing(home_team, away_team, match_date, stage, group=None,
 
     {_context_block("Recent match context", context["recent_match_context"])}
 
+    {_context_block("Recent standout performers", context["recent_standout_performers"])}
+
+    {_context_block("Tournament goal involvements", context["goal_involvements"])}
+
     {_context_block("Tournament goal involvements", context["goal_involvements"])}
 
     {_context_block("Discipline watch", context["discipline_watch"])}
@@ -181,12 +201,15 @@ def generate_match_briefing(home_team, away_team, match_date, stage, group=None,
       obvious to any football fan and adds no value. Focus instead on what
       the result means narratively — pressure, opportunity, must-win situation,
       comfortable position, etc.
-    - A recent form paragraph based only on the recent match context provided.
+   -  A recent form paragraph based only on the recent match context provided.
       Reference the most recent result for each team. If tournament goal
       involvements are listed above, YOU MUST name the players involved and
       their tallies — this is mandatory, not optional. Make clear these are
       tournament totals, not match-specific. Never imply a player scored in
-      a specific match unless explicitly stated.
+      a specific match unless explicitly stated. If standout performer data
+      from each team's most recent match is listed above, weave that player
+      and their performance into this paragraph too, making clear it refers
+      specifically to that previous match and not the tournament as a whole.
     - A discipline paragraph — this is MANDATORY if discipline watch data is
       available above. If it is available, you must name every suspended player
       and every player one yellow card from suspension, for both teams. Do not
@@ -265,6 +288,8 @@ def generate_post_match_report(home_team, away_team, home_score, away_score, sta
 
     {_context_block("Match data", context["match_data"])}
 
+    {_context_block("Player box scores", context.get("box_score"))}
+
     Write this like a match report from a quality sports publication — analytical,
     alive, with a sense of occasion. Be vivid where the moment earns it, precise
     where the data demands it. Never hollow, never over the top.
@@ -279,6 +304,9 @@ def generate_post_match_report(home_team, away_team, home_score, away_score, sta
       possession, corners, big chances, or saves when those numbers are present.
     - A personnel paragraph using the listed lineups, formations, starters,
       and substitutes where present.
+    - Standout performers paragraph for both teams using the box score data — name the top-rated
+      player(s), mention their key stats (goals, assists, xG, key passes, rating).
+      Only reference players and stats explicitly present in the box score data above.
     - A group-standings paragraph explaining what the result means for both teams,
       based strictly on the standings table above. If qualification updates are
       listed above, include them naturally here — e.g. "With this win, Mexico
@@ -314,7 +342,6 @@ def generate_post_match_report(home_team, away_team, home_score, away_score, sta
         messages=[{"role": "user", "content": prompt}]
     )
     return response.choices[0].message.content
-
 
 if __name__ == "__main__":
     briefing = generate_match_briefing("Mexico", "South Africa", "2026-06-11", "GROUP_STAGE", "GROUP_A", match_id=537327)

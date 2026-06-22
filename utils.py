@@ -42,7 +42,8 @@ _cache = {
     "world_cup_matches_timestamp": 0,
     "match_details": {},
     "match_id_lookup": {},
-    "head_to_head": {}
+    "head_to_head": {},
+    "box_scores": {}
 }
 
 CACHE_TTL_SECONDS = 300
@@ -842,3 +843,180 @@ def get_team_tournament_form(team_name, exclude_match_id=None):
         lines.append(f"  {player}: {', '.join(parts)}")
 
     return "\n".join(lines)
+
+def fetch_box_score(highlightly_match_id):
+    if highlightly_match_id in _cache["box_scores"]:
+        cached = _cache["box_scores"][highlightly_match_id]
+        if cached is not None:
+            return cached
+    data = _hl_get(f"box-score/{highlightly_match_id}")
+    result = _as_list(data)
+    if result:
+        _cache["box_scores"][highlightly_match_id] = result
+    return result
+
+def format_box_score_for_prompt(box_score_data, home_team, away_team):
+    if not box_score_data:
+        return None
+    
+    lines = ["Player Box Scores (top performers highlighted):"]
+    
+    for team_data in box_score_data:
+        team_name = (team_data.get("team") or {}).get("name", "Unknown")
+        players = _as_list(team_data.get("players", []))
+        
+        # Filter to players who actually played
+        active = [p for p in players if (p.get("minutesPlayed") or 0) > 0]
+        if not active:
+            continue
+        
+        lines.append(f"\n{team_name}:")
+        
+        for p in active:
+            name = p.get("name") or p.get("fullName", "Unknown")
+            rating = p.get("matchRating", "N/A")
+            position = p.get("position", "")
+            mins = p.get("minutesPlayed", 0)
+            is_sub = p.get("isSubstitute", False)
+            stats_list = _as_list(p.get("statistics"))
+            stats = stats_list[0] if stats_list else {}
+            
+            goals = stats.get("goalsScored", 0)
+            assists = stats.get("assists", 0)
+            xg = stats.get("expectedGoals", 0)
+            xa = stats.get("expectedAssists", 0)
+            shots = stats.get("shotsTotal", 0)
+            shots_ot = stats.get("shotsOnTarget", 0)
+            key_passes = stats.get("passesKey", 0)
+            pass_acc = stats.get("passesAccuracy", "")
+            tackles = stats.get("tacklesTotal", 0)
+            intercepts = stats.get("interceptionsTotal", 0)
+            rating_val = float(rating) if rating and rating != "N/A" else 0
+            
+            # Only include notable players (rating >= 7 or scored/assisted or high xG)
+            if rating_val < 7.0 and goals == 0 and assists == 0 and xg < 0.3:
+                continue
+            
+            sub_str = " (sub)" if is_sub else ""
+            line = f"  {name} [{position}{sub_str}, {mins}', Rating: {rating}]"
+            
+            stats_parts = []
+            if goals: stats_parts.append(f"{goals} goal(s)")
+            if assists: stats_parts.append(f"{assists} assist(s)")
+            if xg: stats_parts.append(f"xG: {xg:.2f}")
+            if xa: stats_parts.append(f"xA: {xa:.2f}")
+            if shots: stats_parts.append(f"shots: {shots_ot}/{shots} on target")
+            if key_passes: stats_parts.append(f"key passes: {key_passes}")
+            if pass_acc: stats_parts.append(f"pass acc: {pass_acc}")
+            if tackles or intercepts: stats_parts.append(f"tackles/intercepts: {tackles}/{intercepts}")
+            
+            if stats_parts:
+                line += " — " + ", ".join(stats_parts)
+            lines.append(line)
+    
+    return "\n".join(lines) if len(lines) > 1 else None
+
+def _team_standout_performer(box_score_data, team_name):
+    if not box_score_data:
+        return None
+
+    best = None
+    best_rating = -1.0
+
+    for team_data in box_score_data:
+        t_name = (team_data.get("team") or {}).get("name", "")
+        if not _names_match(t_name, team_name):
+            continue
+        players = _as_list(team_data.get("players", []))
+        active = [p for p in players if (p.get("minutesPlayed") or 0) > 0]
+        for p in active:
+            try:
+                rating_val = float(p.get("matchRating"))
+            except (TypeError, ValueError):
+                rating_val = 0.0
+            if rating_val > best_rating:
+                best_rating = rating_val
+                best = p
+
+    if not best or best_rating <= 0:
+        return None
+
+    name = best.get("name") or best.get("fullName", "Unknown")
+    stats_list = _as_list(best.get("statistics"))
+    stats = stats_list[0] if stats_list else {}
+    goals = stats.get("goalsScored", 0)
+    assists = stats.get("assists", 0)
+
+    parts = [f"rating {best_rating:.1f}"]
+    if goals:
+        parts.append(f"{goals} goal(s)")
+    if assists:
+        parts.append(f"{assists} assist(s)")
+
+    return f"{name} ({', '.join(parts)})"
+
+
+def format_recent_standout_performers_for_prompt(home_team, away_team, match_date, group_name=None, exclude_match_id=None):
+    previous_matches = _get_previous_group_matches_for_teams(
+        home_team, away_team, match_date,
+        group_name=group_name,
+        exclude_match_id=exclude_match_id,
+    )
+    if not previous_matches:
+        return None
+
+    latest_by_team = {}
+    for match in sorted(previous_matches, key=lambda m: (m.match_date or "", m.match_id or 0)):
+        for team in (home_team, away_team):
+            if match.home_team == team or match.away_team == team:
+                latest_by_team[team] = match
+
+    lines = ["Standout performer from each team's most recent match (match-specific, not tournament totals):"]
+    found = False
+
+    for team in (home_team, away_team):
+        match = latest_by_team.get(team)
+        if not match:
+            continue
+        highlightly_id = find_highlightly_match_id(match.home_team, match.away_team, match.match_date)
+        if not highlightly_id:
+            continue
+        box_score_data = fetch_box_score(highlightly_id)
+        standout = _team_standout_performer(box_score_data, team)
+        if standout:
+            lines.append(f"  {team}: {standout}")
+            found = True
+
+    return "\n".join(lines) if found else None
+
+def fetch_player_summary(player_name):
+    # Search by name
+    data = _hl_get("players", {"name": player_name, "limit": 5})
+    players = _as_list(data)
+    
+    if not players:
+        return None
+    
+    # Take first match
+    player = players[0]
+    player_id = player.get("id")
+    if not player_id:
+        return None
+    
+    # Fetch full summary
+    summary_data = _hl_get(f"players/{player_id}")
+    summary = _as_list(summary_data)
+    summary = summary[0] if summary else {}
+    
+    # Fetch career stats
+    stats_data = _hl_get(f"players/{player_id}/statistics")
+    stats = _as_list(stats_data)
+    stats = stats[0] if stats else {}
+    
+    return {
+        "id": player_id,
+        "name": summary.get("name", player_name),
+        "profile": summary.get("profile", {}),
+        "perCompetition": stats.get("perCompetition", []),
+        "perClub": stats.get("perClub", [])
+    }
