@@ -266,7 +266,26 @@ def api_get(endpoint):
     except Exception as e:
         st.error(f"Unexpected error: {e}")
         return None
-
+    
+    
+def api_post(endpoint, payload):
+    try:
+        r = requests.post(f"{API_BASE}{endpoint}", json=payload, timeout=120)
+        r.raise_for_status()
+        return r.json()
+    except requests.exceptions.ConnectionError:
+        st.error("Cannot connect to MatchMind API. Make sure the server is running.")
+        return None
+    except requests.exceptions.HTTPError as e:
+        try:
+            detail = e.response.json().get("detail", str(e))
+        except (ValueError, requests.exceptions.JSONDecodeError):
+            detail = f"Server error ({e.response.status_code}): no response body"
+        return {"error": detail}
+    except Exception as e:
+        st.error(f"Unexpected error: {e}")
+        return None
+    
 
 def status_class(status):
     s = status.upper()
@@ -425,7 +444,7 @@ st.markdown("""
 <div class="mm-divider"></div>
 """, unsafe_allow_html=True)
 
-tab1, tab2, tab3 = st.tabs(["Today", "All Fixtures", "Reports"])
+tab1, tab2, tab3, tab4 = st.tabs(["Today", "All Fixtures", "Reports", "Fan Debate"])
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -539,3 +558,114 @@ with tab3:
                 st.markdown(f'<div class="section-label">{date_key}</div>', unsafe_allow_html=True)
                 for m in by_date[date_key]:
                     render_match_card(m, key_prefix="reports")
+
+# ══════════════════════════════════════════════════════════════════
+# TAB 4 — FAN DEBATE
+# ══════════════════════════════════════════════════════════════════
+
+with tab4:
+    st.markdown('<div class="section-label">Fan Debate Analyzer — 2026 FIFA World Cup</div>', unsafe_allow_html=True)
+
+    debate_type = st.radio(
+        "Compare", ["Players", "Teams"],
+        horizontal=True,
+        label_visibility="collapsed"
+    )
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    if debate_type == "Players":
+        st.markdown('<div class="section-label">Enter player names as they appear in match data (2–4 players)</div>', unsafe_allow_html=True)
+
+        if "debate_player_count" not in st.session_state:
+            st.session_state["debate_player_count"] = 2
+
+        player_inputs = []
+        for i in range(st.session_state["debate_player_count"]):
+            val = st.text_input(
+                f"Player {i + 1}",
+                key=f"debate_player_{i}",
+                label_visibility="collapsed",
+                placeholder=f"Player {i + 1} name"
+            )
+            player_inputs.append(val)
+
+        add_col, remove_col, _ = st.columns([1, 1, 6])
+        with add_col:
+            if st.session_state["debate_player_count"] < 4:
+                if st.button("+ Add player"):
+                    st.session_state["debate_player_count"] += 1
+                    st.rerun()
+        with remove_col:
+            if st.session_state["debate_player_count"] > 2:
+                if st.button("– Remove"):
+                    st.session_state["debate_player_count"] -= 1
+                    st.rerun()
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        players = [p.strip() for p in player_inputs if p.strip()]
+
+        if st.button("⚡ Generate Debate", key="debate_players_btn"):
+            if len(players) < 2:
+                st.error("Enter at least 2 player names.")
+            else:
+                with st.spinner("Analyzing tournament data..."):
+                    result = api_post("/debate/players", {"players": players})
+                if result and "error" not in result:
+                    st.session_state["debate_result"] = result
+                elif result:
+                    st.error(result["error"])
+
+    else:  # Teams
+        all_matches = api_get("/matches")
+        team_list = []
+        if all_matches and "error" not in all_matches:
+            teams_seen = set()
+            for m in all_matches:
+                teams_seen.add(m["home_team"])
+                teams_seen.add(m["away_team"])
+            team_list = sorted(t for t in teams_seen if t)
+
+        st.markdown('<div class="section-label">Select two teams to compare</div>', unsafe_allow_html=True)
+        t_col1, t_col2 = st.columns(2)
+        with t_col1:
+            team_a = st.selectbox("Team A", team_list, key="debate_team_a", label_visibility="collapsed")
+        with t_col2:
+            remaining = [t for t in team_list if t != team_a]
+            team_b = st.selectbox("Team B", remaining, key="debate_team_b", label_visibility="collapsed")
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        if st.button("⚡ Generate Debate", key="debate_teams_btn"):
+            with st.spinner("Analyzing tournament data..."):
+                result = api_post("/debate/teams", {"teams": [team_a, team_b]})
+            if result and "error" not in result:
+                st.session_state["debate_result"] = result
+            elif result:
+                st.error(result["error"])
+
+    # ── Result display ─────────────────────────────────────────────
+    if "debate_result" in st.session_state:
+        r = st.session_state["debate_result"]
+        subjects = r.get("subjects", [])
+        is_players = r.get("type") == "players"
+
+        label = " vs ".join(subjects)
+        sub_label = "Player Comparison" if is_players else "Team Comparison"
+
+        close_col, _ = st.columns([1, 9])
+        with close_col:
+            if st.button("✕ Clear", key="debate_close"):
+                del st.session_state["debate_result"]
+                st.rerun()
+
+        st.markdown(f"""
+<div class="ai-modal">
+    <div class="ai-modal-fixture">
+        <div class="ai-modal-teams">{label}</div>
+        <div class="ai-modal-sub">2026 FIFA World Cup · {sub_label}</div>
+    </div>
+    <div class="ai-modal-header">Fan Debate Analysis</div>
+    {format_ai_text(r['debate'])}
+</div>
+""", unsafe_allow_html=True)

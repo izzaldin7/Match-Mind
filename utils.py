@@ -1,9 +1,11 @@
 import requests
-from database import Session, Match
+from database import Session, Match, GeneratedContent
 from dotenv import load_dotenv
 import os
 import re
 import time
+import json
+from datetime import datetime, timezone
 
 load_dotenv()
 
@@ -37,6 +39,11 @@ TEAM_NAME_ALIASES = {
 }
 
 # ── In-memory cache ────────────────────────────────────────────────
+# NOTE: everything in this dict still resets on server restart. Raw
+# Highlightly data (match details, box scores) lives here. Generated
+# briefing/report TEXT is persisted separately via the DB-backed
+# get_cached_content/save_cached_content helpers below, so that part
+# survives restarts (e.g. when swapping API keys).
 _cache = {
     "world_cup_matches": None,
     "world_cup_matches_timestamp": 0,
@@ -46,12 +53,92 @@ _cache = {
     "box_scores": {}
 }
 
-CACHE_TTL_SECONDS = 300
+_tournament_stats_cache = {
+    "players": {},
+    "teams": {},
+    "matches_processed": set()
+}
+
+def _safe_float(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+HIGHLIGHTLY_MATCHES_TTL_SECONDS = 300
+BRIEFING_CACHE_TTL_SECONDS = 60 * 60 * 2
+
+
+# ── Persistent (DB-backed) cache for generated briefings/reports ───
+
+def get_cached_content(match_id, content_type, ttl_seconds=None):
+    """
+    Look up a previously generated briefing/report for this match.
+    Returns the parsed response dict, or None if nothing cached (or
+    if it's older than ttl_seconds, when a ttl is given).
+
+    Pass ttl_seconds=None (the default) for content that never goes
+    stale once generated — e.g. post-match reports, since a finished
+    match's facts don't change. Pass a ttl for content that CAN go
+    stale — e.g. pre-match briefings, since standings/qualification
+    scenarios can shift before kickoff.
+    """
+    session = Session()
+    try:
+        row = (
+            session.query(GeneratedContent)
+            .filter_by(match_id=match_id, content_type=content_type)
+            .order_by(GeneratedContent.created_at.desc())
+            .first()
+        )
+    finally:
+        session.close()
+
+    if not row:
+        return None
+
+    if ttl_seconds is not None:
+        created = row.created_at
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=timezone.utc)
+        age = (datetime.now(timezone.utc) - created).total_seconds()
+        if age > ttl_seconds:
+            return None
+
+    try:
+        return json.loads(row.payload)
+    except (TypeError, ValueError):
+        return None
+
+
+def save_cached_content(match_id, content_type, result):
+    """
+    Persist a generated briefing/report so future requests for the
+    same match + type skip both context-building and the Groq call.
+    Replaces any prior row for this (match_id, content_type) pair —
+    we only ever want the latest version, not a history.
+    """
+    session = Session()
+    try:
+        session.query(GeneratedContent).filter_by(
+            match_id=match_id, content_type=content_type
+        ).delete()
+        session.add(GeneratedContent(
+            match_id=match_id,
+            content_type=content_type,
+            payload=json.dumps(result)
+        ))
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
 
 
 def _get_world_cup_matches():
     now = time.time()
-    if _cache["world_cup_matches"] is None or (now - _cache["world_cup_matches_timestamp"]) > CACHE_TTL_SECONDS:
+    if _cache["world_cup_matches"] is None or (now - _cache["world_cup_matches_timestamp"]) > HIGHLIGHTLY_MATCHES_TTL_SECONDS:
         _cache["world_cup_matches"] = fetch_world_cup_matches()
         _cache["world_cup_matches_timestamp"] = now
         _cache["match_id_lookup"].clear()
@@ -399,8 +486,10 @@ def format_match_events(match_detail):
 
     lines = []
     goals = [e for e in events if str(e.get("type", "")).lower() in ("goal", "penalty", "own goal")]
+    missed_penalties = [e for e in events if str(e.get("type", "")).lower() == "missed penalty"]
     cards = [e for e in events if "card" in str(e.get("type", "")).lower()]
-    subs = [e for e in events if str(e.get("type", "")).lower() == "substitution"]
+    subs  = [e for e in events if str(e.get("type", "")).lower() == "substitution"]
+    var_events = [e for e in events if str(e.get("type", "")).lower().startswith("var")]
 
     if goals:
         lines.append("Goals:")
@@ -416,6 +505,24 @@ def format_match_events(match_detail):
             else:
                 lines.append(f"  {_event_minute(g)} {player} ({team_name}){assist_str} [{g.get('type')}]")
 
+    if missed_penalties:
+        lines.append("\nMissed Penalties:")
+        for mp in missed_penalties:
+            team = mp.get("team") or {}
+            player = _event_player(mp, "player", "scorer", "playerName")
+            lines.append(f"  {_event_minute(mp)} {player} ({team.get('name')}) [Missed Penalty]")
+
+    if var_events:
+        lines.append("\nVAR Decisions:")
+        for v in var_events:
+            team = v.get("team") or {}
+            player = _event_player(v, "player", "playerName")
+            event_type = v.get("type", "VAR Decision")
+            team_name = team.get("name")
+            player_str = f" - {player}" if player else ""
+            team_str = f" ({team_name})" if team_name else ""
+            lines.append(f"  {_event_minute(v)} {event_type}{player_str}{team_str}")
+
     if cards:
         lines.append("\nCards:")
         for c in cards:
@@ -427,7 +534,7 @@ def format_match_events(match_detail):
         lines.append("\nSubstitutions:")
         for s in subs:
             team = s.get("team") or {}
-            player_on = _event_player(s, "substituted", "playerIn", "in")
+            player_on  = _event_player(s, "substituted", "playerIn", "in")
             player_off = _event_player(s, "player", "playerOut", "out")
             if player_off:
                 lines.append(f"  {_event_minute(s)} SUB ON: {player_on} / SUB OFF: {player_off} ({team.get('name')})")
@@ -979,6 +1086,287 @@ def format_box_score_for_prompt(box_score_data, home_team, away_team):
             lines.append(line)
 
     return "\n".join(lines) if len(lines) > 1 else None
+
+def build_tournament_cache():
+    session = Session()
+    finished = session.query(Match).filter(
+        Match.status.in_(["FINISHED", "Finished"])
+    ).all()
+    session.close()
+
+    if not finished:
+        return
+
+    new_matches = [
+        m for m in finished
+        if m.match_id not in _tournament_stats_cache["matches_processed"]
+    ]
+
+    if not new_matches:
+        return
+
+    processed = 0
+
+    for match in new_matches:
+        highlightly_id = find_highlightly_match_id(
+            match.home_team, match.away_team, match.match_date
+        )
+
+        # Only use already-cached data — never make a new API call
+        box_score_data = _cache["box_scores"].get(highlightly_id) if highlightly_id else None
+        match_detail = _cache["match_details"].get(highlightly_id) if highlightly_id else None
+
+        # Mark as processed regardless — if data isn't cached yet,
+        # it'll get picked up next time someone generates a report for this match
+        _tournament_stats_cache["matches_processed"].add(match.match_id)
+
+        if not box_score_data and not match_detail:
+            continue
+
+        # --- Player stats from box score ---
+        if box_score_data:
+            for team_data in box_score_data:
+                t_name = (team_data.get("team") or {}).get("name", "")
+                for p in _as_list(team_data.get("players", [])):
+                    mins = p.get("minutesPlayed") or 0
+                    if mins == 0:
+                        continue
+                    name = p.get("name") or p.get("fullName", "")
+                    if not name:
+                        continue
+
+                    stats_list = _as_list(p.get("statistics"))
+                    stats = stats_list[0] if stats_list else {}
+
+                    if name not in _tournament_stats_cache["players"]:
+                        _tournament_stats_cache["players"][name] = {
+                            "team": t_name, "matches": 0, "minutes": 0,
+                            "goals": 0, "assists": 0, "ratings": [],
+                            "xg": 0.0, "xa": 0.0, "xgot": 0.0, "xgp": 0.0,
+                            "shots_total": 0, "shots_on_target": 0,
+                            "dribbles_successful": 0, "dribbles_total": 0,
+                            "key_passes": 0, "passes_total": 0, "passes_successful": 0,
+                            "duels_won": 0, "duels_total": 0,
+                            "tackles": 0, "interceptions": 0,
+                            "goals_saved": 0, "goals_conceded": 0,
+                            "cards_yellow": 0, "cards_red": 0,
+                            "fouls_committed": 0, "fouls_suffered": 0,
+                        }
+
+                    pc = _tournament_stats_cache["players"][name]
+                    pc["matches"] += 1
+                    pc["minutes"] += mins
+                    pc["goals"] += stats.get("goalsScored", 0)
+                    pc["assists"] += stats.get("assists", 0)
+                    pc["shots_total"] += stats.get("shotsTotal", 0)
+                    pc["shots_on_target"] += stats.get("shotsOnTarget", 0)
+                    pc["dribbles_successful"] += stats.get("dribblesSuccessful", 0)
+                    pc["dribbles_total"] += stats.get("dribblesTotal", 0)
+                    pc["key_passes"] += stats.get("passesKey", 0)
+                    pc["passes_total"] += stats.get("passesTotal", 0)
+                    pc["passes_successful"] += stats.get("passesSuccessful", 0)
+                    pc["duels_won"] += stats.get("duelsWon", 0)
+                    pc["duels_total"] += stats.get("duelsTotal", 0)
+                    pc["tackles"] += stats.get("tacklesTotal", 0)
+                    pc["interceptions"] += stats.get("interceptionsTotal", 0)
+                    pc["goals_saved"] += stats.get("goalsSaved", 0)
+                    pc["goals_conceded"] += stats.get("goalsConceded", 0)
+                    pc["cards_yellow"] += stats.get("cardsYellow", 0)
+                    pc["cards_red"] += stats.get("cardsRed", 0)
+                    pc["fouls_committed"] += stats.get("fouledOthers", 0)
+                    pc["fouls_suffered"] += stats.get("fouledByOthers", 0)
+                    pc["xg"] += _safe_float(stats.get("expectedGoals", 0)) or 0
+                    pc["xa"] += _safe_float(stats.get("expectedAssists", 0)) or 0
+                    pc["xgot"] += _safe_float(stats.get("expectedGoalsOnTarget", 0)) or 0
+                    pc["xgp"] += _safe_float(stats.get("expectedGoalsPrevented", 0)) or 0
+                    try:
+                        r = float(p.get("matchRating") or 0)
+                        if r > 0:
+                            pc["ratings"].append(r)
+                    except (TypeError, ValueError):
+                        pass
+
+        # --- Team stats from DB + cached match detail ---
+        for team_name in (match.home_team, match.away_team):
+            if team_name not in _tournament_stats_cache["teams"]:
+                _tournament_stats_cache["teams"][team_name] = {
+                    "matches": 0, "won": 0, "drawn": 0, "lost": 0,
+                    "goals_for": 0, "goals_against": 0,
+                    "xg_for": 0.0, "possession_total": 0.0, "possession_matches": 0,
+                    "shots_on_target": 0, "corners": 0, "clean_sheets": 0,
+                    "cards_yellow": 0, "cards_red": 0,
+                }
+
+        hc = _tournament_stats_cache["teams"][match.home_team]
+        ac = _tournament_stats_cache["teams"][match.away_team]
+        hg = match.home_score or 0
+        ag = match.away_score or 0
+
+        hc["matches"] += 1; ac["matches"] += 1
+        hc["goals_for"] += hg; hc["goals_against"] += ag
+        ac["goals_for"] += ag; ac["goals_against"] += hg
+        if hg == 0: ac["clean_sheets"] += 1
+        if ag == 0: hc["clean_sheets"] += 1
+        if hg > ag: hc["won"] += 1; ac["lost"] += 1
+        elif ag > hg: ac["won"] += 1; hc["lost"] += 1
+        else: hc["drawn"] += 1; ac["drawn"] += 1
+
+        if match_detail:
+            for team_stats in _as_list(match_detail.get("statistics", [])):
+                t_name = (team_stats.get("team") or {}).get("name", "")
+                canonical = None
+                if _names_match(t_name, match.home_team): canonical = match.home_team
+                elif _names_match(t_name, match.away_team): canonical = match.away_team
+                if not canonical:
+                    continue
+                tc = _tournament_stats_cache["teams"][canonical]
+                values = {}
+                for row in _as_list(team_stats.get("statistics", [])):
+                    k = _first_present(row.get("displayName"), row.get("name"))
+                    v = _first_present(row.get("value"), row.get("displayValue"))
+                    if k and v is not None:
+                        values[k] = v
+                poss = values.get("Possession")
+                if poss is not None:
+                    try:
+                        p_float = float(poss) if isinstance(poss, (int, float)) else float(str(poss).replace('%','').strip()) / 100
+                        tc["possession_total"] += p_float
+                        tc["possession_matches"] += 1
+                    except (ValueError, TypeError):
+                        pass
+                xg = _safe_float(values.get("Expected Goals"))
+                if xg: tc["xg_for"] += xg
+                for stat_key, cache_key in [
+                    ("Shots on target", "shots_on_target"),
+                    ("Corners", "corners")
+                ]:
+                    val = values.get(stat_key)
+                    if val:
+                        try: tc[cache_key] += int(val)
+                        except (ValueError, TypeError): pass
+
+            for card in _extract_card_events(match_detail, (match.home_team, match.away_team)):
+                tc = _tournament_stats_cache["teams"].get(card["team"])
+                if not tc: continue
+                if card["kind"] == "Yellow Card": tc["cards_yellow"] += 1
+                elif card["kind"] == "Red Card": tc["cards_red"] += 1
+
+        processed += 1
+
+    if processed:
+        print(f"Tournament cache updated — "
+              f"{len(_tournament_stats_cache['players'])} players, "
+              f"{len(_tournament_stats_cache['teams'])} teams tracked.")
+
+
+def get_player_tournament_stats(player_name):
+    build_tournament_cache()
+    matched = _match_player_name(player_name, _tournament_stats_cache["players"].keys())
+    if not matched:
+        return None, player_name
+    return _tournament_stats_cache["players"][matched], matched
+
+
+def _match_player_name(name, candidates):
+    if not name:
+        return None
+    # exact match first
+    if name in candidates:
+        return name
+    # case-insensitive exact match
+    lowered = name.strip().lower()
+    for candidate in candidates:
+        if candidate.lower() == lowered:
+            return candidate
+    # substring match as a fallback (e.g. "Mbappe" -> "Kylian Mbappé")
+    # note: this won't match accented vs unaccented names
+    for candidate in candidates:
+        if lowered in candidate.lower() or candidate.lower() in lowered:
+            return candidate
+    return None
+
+
+def get_team_tournament_stats(team_name):
+    build_tournament_cache()
+    if team_name in _tournament_stats_cache["teams"]:
+        return _tournament_stats_cache["teams"][team_name]
+    canonical = TEAM_NAME_ALIASES.get(team_name, team_name)
+    return _tournament_stats_cache["teams"].get(canonical)
+
+
+def format_player_debate_context(player_names):
+    build_tournament_cache()
+    blocks = []
+    not_found = []
+
+    for name in player_names:
+        stats, matched = get_player_tournament_stats(name)
+        if not stats:
+            not_found.append(name)
+            continue
+
+        avg_rating = sum(stats["ratings"]) / len(stats["ratings"]) if stats["ratings"] else None
+        pass_acc = f"{round(stats['passes_successful'] / stats['passes_total'] * 100)}%" if stats["passes_total"] else None
+
+        lines = [f"Player: {matched} ({stats['team']})"]
+        lines.append(f"  Matches: {stats['matches']} ({stats['minutes']} mins)")
+        lines.append(f"  Goals: {stats['goals']} | Assists: {stats['assists']}")
+        lines.append(f"  xG: {stats['xg']:.2f} | xA: {stats['xa']:.2f}")
+        if avg_rating:
+            lines.append(f"  Avg match rating: {avg_rating:.2f} across {len(stats['ratings'])} match(es)")
+        lines.append(f"  Shots: {stats['shots_on_target']}/{stats['shots_total']} on target")
+        if stats["dribbles_total"]:
+            lines.append(f"  Dribbles: {stats['dribbles_successful']}/{stats['dribbles_total']} successful")
+        lines.append(f"  Key passes: {stats['key_passes']}")
+        if pass_acc:
+            lines.append(f"  Pass accuracy: {pass_acc} ({stats['passes_total']} attempted)")
+        if stats["duels_total"]:
+            lines.append(f"  Duels: {stats['duels_won']}/{stats['duels_total']} won")
+        lines.append(f"  Tackles: {stats['tackles']} | Interceptions: {stats['interceptions']}")
+        if stats["goals_saved"]:
+            lines.append(f"  Goals saved: {stats['goals_saved']} | xGP: {stats['xgp']:.2f}")
+        if stats["cards_yellow"] or stats["cards_red"]:
+            lines.append(f"  Cards: {stats['cards_yellow']} yellow, {stats['cards_red']} red")
+        blocks.append("\n".join(lines))
+
+    result = "\n\n".join(blocks)
+    if not_found:
+        result += f"\n\nNote: No tournament data found for: {', '.join(not_found)}. They may not have appeared in any match yet, or the name doesn't match exactly."
+    return result if blocks else None
+
+
+def format_team_debate_context(team_names):
+    build_tournament_cache()
+    blocks = []
+    not_found = []
+
+    for name in team_names:
+        stats = get_team_tournament_stats(name)
+        if not stats:
+            not_found.append(name)
+            continue
+        gd = stats["goals_for"] - stats["goals_against"]
+        avg_poss = f"{round(stats['possession_total'] / stats['possession_matches'] * 100)}%" if stats["possession_matches"] else None
+
+        lines = [f"Team: {name}"]
+        lines.append(f"  Record: {stats['matches']}MP — {stats['won']}W {stats['drawn']}D {stats['lost']}L")
+        lines.append(f"  Goals: {stats['goals_for']} scored, {stats['goals_against']} conceded (GD: {gd:+d})")
+        lines.append(f"  Clean sheets: {stats['clean_sheets']}")
+        lines.append(f"  xG for: {stats['xg_for']:.2f}")
+        if avg_poss:
+            lines.append(f"  Avg possession: {avg_poss}")
+        if stats["shots_on_target"]:
+            lines.append(f"  Shots on target: {stats['shots_on_target']}")
+        if stats["corners"]:
+            lines.append(f"  Corners won: {stats['corners']}")
+        if stats["cards_yellow"] or stats["cards_red"]:
+            lines.append(f"  Cards: {stats['cards_yellow']} yellow, {stats['cards_red']} red")
+        blocks.append("\n".join(lines))
+
+    result = "\n\n".join(blocks)
+    if not_found:
+        result += f"\n\nNote: No tournament data found for: {', '.join(not_found)}."
+    return result if blocks else None
 
 def _team_standout_performer(box_score_data, team_name):
     if not box_score_data:

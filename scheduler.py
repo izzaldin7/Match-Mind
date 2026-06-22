@@ -3,6 +3,7 @@ from database import Session, Match
 import requests
 from dotenv import load_dotenv
 import os
+from utils import build_tournament_cache
 
 load_dotenv()
 

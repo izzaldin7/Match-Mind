@@ -1,14 +1,14 @@
 import os
-
-from sqlalchemy import create_engine, Column, Integer, String
+from datetime import datetime, timezone
+from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import sessionmaker
 
 Base = declarative_base()
 
+
 class Match(Base):
     __tablename__ = "matches"
-
     id = Column(Integer, primary_key=True)
     match_id = Column(Integer, unique=True)
     home_team = Column(String)
@@ -21,9 +21,24 @@ class Match(Base):
     group_name = Column(String, nullable=True)
     kick_off_time = Column(String, nullable=True)
 
+
+class GeneratedContent(Base):
+    """
+    Persists generated briefing/report text per match so repeated requests
+    for the same match don't re-call Groq (or re-fetch Highlightly data)
+    after a server restart. One row per (match_id, content_type) pair —
+    save_cached_content() in utils.py deletes any prior row before inserting.
+    """
+    __tablename__ = "generated_content"
+    id = Column(Integer, primary_key=True)
+    match_id = Column(Integer, index=True)
+    content_type = Column(String)   # "report" or "briefing"
+    payload = Column(Text)          # JSON-encoded response dict
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///matchmind.db")
 connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
-
 engine = create_engine(DATABASE_URL, connect_args=connect_args)
 Base.metadata.create_all(engine)
 Session = sessionmaker(bind=engine)
