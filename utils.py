@@ -858,62 +858,126 @@ def fetch_box_score(highlightly_match_id):
 def format_box_score_for_prompt(box_score_data, home_team, away_team):
     if not box_score_data:
         return None
-    
+
     lines = ["Player Box Scores (top performers highlighted):"]
-    
+
     for team_data in box_score_data:
         team_name = (team_data.get("team") or {}).get("name", "Unknown")
         players = _as_list(team_data.get("players", []))
-        
-        # Filter to players who actually played
+
         active = [p for p in players if (p.get("minutesPlayed") or 0) > 0]
         if not active:
             continue
-        
+
         lines.append(f"\n{team_name}:")
-        
+
         for p in active:
             name = p.get("name") or p.get("fullName", "Unknown")
             rating = p.get("matchRating", "N/A")
             position = p.get("position", "")
             mins = p.get("minutesPlayed", 0)
             is_sub = p.get("isSubstitute", False)
+            is_captain = p.get("isCaptain", False)
+            offsides = p.get("offsides", 0)
+
             stats_list = _as_list(p.get("statistics"))
             stats = stats_list[0] if stats_list else {}
-            
+
             goals = stats.get("goalsScored", 0)
             assists = stats.get("assists", 0)
+            goals_saved = stats.get("goalsSaved", 0)
+            goals_conceded = stats.get("goalsConceded", 0)
+
             xg = stats.get("expectedGoals", 0)
             xa = stats.get("expectedAssists", 0)
+            xgot = stats.get("expectedGoalsOnTarget", 0)
+            xgot_conceded = stats.get("expectedGoalsOnTargetConceded", 0)
+            xgp = stats.get("expectedGoalsPrevented", 0)
+
             shots = stats.get("shotsTotal", 0)
             shots_ot = stats.get("shotsOnTarget", 0)
+            shots_acc = stats.get("shotsAccuracy", "")
+
+            dribbles_total = stats.get("dribblesTotal", 0)
+            dribbles_succ = stats.get("dribblesSuccessful", 0)
+
             key_passes = stats.get("passesKey", 0)
             pass_acc = stats.get("passesAccuracy", "")
+            passes_total = stats.get("passesTotal", 0)
+
             tackles = stats.get("tacklesTotal", 0)
             intercepts = stats.get("interceptionsTotal", 0)
-            rating_val = float(rating) if rating and rating != "N/A" else 0
-            
-            # Only include notable players (rating >= 7 or scored/assisted or high xG)
-            if rating_val < 7.0 and goals == 0 and assists == 0 and xg < 0.3:
+
+            duels_total = stats.get("duelsTotal", 0)
+            duels_won = stats.get("duelsWon", 0)
+            duel_rate = stats.get("duelSuccessRate", "")
+
+            fouled_by_others = stats.get("fouledByOthers", 0)
+            fouled_others = stats.get("fouledOthers", 0)
+
+            pens_scored = stats.get("penaltiesScored", 0)
+            pens_missed = stats.get("penaltiesMissed", 0)
+
+            cards_yellow = stats.get("cardsYellow", 0)
+            cards_red = stats.get("cardsRed", 0)
+            cards_second_yellow = stats.get("cardsSecondYellow", 0)
+
+            try:
+                rating_val = float(rating) if rating and rating != "N/A" else 0
+            except (TypeError, ValueError):
+                rating_val = 0
+
+            # Only include notable players (high rating, goal involvement, strong underlying numbers,
+            # a card, or a goalkeeper-relevant stat)
+            is_notable = (
+                rating_val >= 7.0
+                or goals > 0
+                or assists > 0
+                or xg >= 0.3
+                or goals_saved >= 3
+                or cards_red > 0
+                or cards_second_yellow > 0
+            )
+            if not is_notable:
                 continue
-            
+
             sub_str = " (sub)" if is_sub else ""
-            line = f"  {name} [{position}{sub_str}, {mins}', Rating: {rating}]"
-            
+            captain_str = " (C)" if is_captain else ""
+            line = f"  {name}{captain_str} [{position}{sub_str}, {mins}', Rating: {rating}]"
+
             stats_parts = []
             if goals: stats_parts.append(f"{goals} goal(s)")
             if assists: stats_parts.append(f"{assists} assist(s)")
+            if pens_scored: stats_parts.append(f"{pens_scored} penalty/penalties scored")
+            if pens_missed: stats_parts.append(f"{pens_missed} penalty/penalties missed")
             if xg: stats_parts.append(f"xG: {xg:.2f}")
             if xa: stats_parts.append(f"xA: {xa:.2f}")
-            if shots: stats_parts.append(f"shots: {shots_ot}/{shots} on target")
+            if xgot: stats_parts.append(f"xGOT: {xgot:.2f}")
+            if shots: stats_parts.append(f"shots: {shots_ot}/{shots} on target ({shots_acc})" if shots_acc else f"shots: {shots_ot}/{shots} on target")
+            if dribbles_total: stats_parts.append(f"dribbles: {dribbles_succ}/{dribbles_total} successful")
             if key_passes: stats_parts.append(f"key passes: {key_passes}")
-            if pass_acc: stats_parts.append(f"pass acc: {pass_acc}")
+            if pass_acc and passes_total: stats_parts.append(f"passing: {pass_acc} acc ({passes_total} attempted)")
+            if duels_total: stats_parts.append(f"duels: {duels_won}/{duels_total} won ({duel_rate})" if duel_rate else f"duels: {duels_won}/{duels_total} won")
             if tackles or intercepts: stats_parts.append(f"tackles/intercepts: {tackles}/{intercepts}")
-            
+            if fouled_by_others: stats_parts.append(f"fouled: {fouled_by_others}")
+            if fouled_others: stats_parts.append(f"fouls committed: {fouled_others}")
+            if offsides: stats_parts.append(f"offsides: {offsides}")
+
+            # Goalkeeper-specific
+            if position and "goalkeeper" in position.lower():
+                if goals_saved: stats_parts.append(f"saves: {goals_saved}")
+                if goals_conceded: stats_parts.append(f"goals conceded: {goals_conceded}")
+                if xgot_conceded: stats_parts.append(f"xGOT conceded: {xgot_conceded:.2f}")
+                if xgp: stats_parts.append(f"goals prevented (xGP): {xgp:.2f}")
+
+            if cards_yellow: stats_parts.append(f"yellow card{'s' if cards_yellow > 1 else ''}: {cards_yellow}")
+            if cards_second_yellow: stats_parts.append("second yellow (sent off)")
+            if cards_red: stats_parts.append("red card")
+
             if stats_parts:
                 line += " — " + ", ".join(stats_parts)
             lines.append(line)
-    
+
     return "\n".join(lines) if len(lines) > 1 else None
 
 def _team_standout_performer(box_score_data, team_name):

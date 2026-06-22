@@ -305,8 +305,13 @@ def generate_post_match_report(home_team, away_team, home_score, away_score, sta
     - A personnel paragraph using the listed lineups, formations, starters,
       and substitutes where present.
     - Standout performers paragraph for both teams using the box score data — name the top-rated
-      player(s), mention their key stats (goals, assists, xG, key passes, rating).
-      Only reference players and stats explicitly present in the box score data above.
+      player(s) and explain specifically what they did to earn that rating. Use the supporting
+      stats (goals, assists, xG, xA, dribbles completed, duels won, key passes, passing accuracy,
+      saves, tackles/interceptions, fouls won) to justify the number, but only cite the stats that
+      meaningfully explain it — a 9.0 rating built on a hat-trick does not need its tackle count
+      mentioned, while a 9.0 rating with zero goals should be explained through dribbles, defensive
+      actions, duels, or passing instead. Do not dump every stat listed for a player. Only reference
+      players and stats explicitly present in the box score data above.
     - A group-standings paragraph explaining what the result means for both teams,
       based strictly on the standings table above. If qualification updates are
       listed above, include them naturally here — e.g. "With this win, Mexico
@@ -337,11 +342,14 @@ def generate_post_match_report(home_team, away_team, home_score, away_score, sta
       "SUB OFF" means the player left the pitch. Never reverse this.
     """
 
-    response = get_groq_client().chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        messages=[{"role": "user", "content": prompt}]
-    )
-    return response.choices[0].message.content
+    try:
+        response = get_groq_client().chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "user", "content": prompt}]
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        raise RuntimeError(f"Failed to generate content via Groq: {e}")
 
 if __name__ == "__main__":
     briefing = generate_match_briefing("Mexico", "South Africa", "2026-06-11", "GROUP_STAGE", "GROUP_A", match_id=537327)
