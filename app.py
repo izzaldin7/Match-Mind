@@ -223,13 +223,8 @@ st.markdown("""
 
     div[data-testid="stHorizontalBlock"] {
         gap: 0 !important;
-        margin-top: -0.9rem !important;
+        margin-top: -0.5rem !important;
         margin-bottom: 0.75rem !important;
-        background: #0f1525 !important;
-        border: 1px solid #1a2035 !important;
-        border-top: none !important;
-        border-radius: 0 0 4px 4px !important;
-        padding: 0 !important;
     }
 
     div[data-testid="stHorizontalBlock"] div[data-testid="stButton"] button {
@@ -241,6 +236,7 @@ st.markdown("""
         font-size: 0.65rem !important;
         color: #5a6070 !important;
         border-color: #1a2035 !important;
+        background: #0f1525 !important;
         white-space: nowrap !important;
         overflow: hidden !important;
         text-overflow: ellipsis !important;
@@ -248,6 +244,7 @@ st.markdown("""
     div[data-testid="stHorizontalBlock"] div[data-testid="stButton"] button:hover {
         color: #FFD700 !important;
         border-color: #FFD70040 !important;
+        background: #FFD70010 !important;
     }
     div[data-testid="column"] + div[data-testid="column"] {
         padding-left: 1rem !important;
@@ -354,13 +351,11 @@ def render_standings(standings):
 
 
 def _short_name(full_name):
-    """Shorten player name to fit in the token: last name or abbrev first name."""
     if not full_name:
         return ""
     parts = full_name.strip().split()
     if len(parts) == 1:
         return parts[0][:10]
-    # First initial + last name if long, else just last name
     last = parts[-1]
     if len(last) <= 9:
         return last
@@ -388,7 +383,6 @@ def render_lineup_card(lineup_data, home_team, away_team):
     home_subs = home.get("substitutes", [])
     away_subs = away.get("substitutes", [])
 
-    # Header always shows regardless
     st.markdown(f"""
 <div style="text-align:center;margin-bottom:1.5rem;">
     <div style="font-family:'Bebas Neue',sans-serif;font-size:1.8rem;letter-spacing:3px;color:#ffffff;">
@@ -400,7 +394,6 @@ def render_lineup_card(lineup_data, home_team, away_team):
 </div>
 """, unsafe_allow_html=True)
 
-    # If neither team has starters yet, show not available
     if not home_starters and not away_starters:
         st.markdown("""
 <div style="text-align:center;padding:2rem;color:#5a6070;font-family:'Inter',sans-serif;font-size:0.85rem;letter-spacing:1px;">
@@ -409,7 +402,6 @@ def render_lineup_card(lineup_data, home_team, away_team):
 """, unsafe_allow_html=True)
         return
 
-    # Side by side columns
     col_home, col_div, col_away = st.columns([5, 0.2, 5])
 
     def render_team_column(col, team_name, formation, starters, subs):
@@ -422,7 +414,6 @@ def render_lineup_card(lineup_data, home_team, away_team):
 </div>
 """, unsafe_allow_html=True)
 
-            # Starters
             st.markdown('<div style="font-family:\'Inter\',sans-serif;font-size:0.6rem;letter-spacing:2px;text-transform:uppercase;color:#5a6070;margin-bottom:0.4rem;">Starting XI</div>', unsafe_allow_html=True)
 
             for p in starters:
@@ -439,7 +430,6 @@ def render_lineup_card(lineup_data, home_team, away_team):
 </div>
 """, unsafe_allow_html=True)
 
-            # Subs
             if subs:
                 st.markdown('<div style="font-family:\'Inter\',sans-serif;font-size:0.6rem;letter-spacing:2px;text-transform:uppercase;color:#5a6070;margin-top:1rem;margin-bottom:0.4rem;">Substitutes</div>', unsafe_allow_html=True)
                 for s in subs:
@@ -481,7 +471,6 @@ def render_match_card(m, key_prefix=""):
     active_key = f"active_{key_prefix}_{mid}"
     lineup_active_key = f"lineup_active_{key_prefix}_{mid}"
 
-    # Match card HTML
     st.markdown(f"""
 <div class="match-card {card_class}">
     <div style="display:flex;align-items:center;justify-content:center;gap:1.5rem;">
@@ -495,68 +484,64 @@ def render_match_card(m, key_prefix=""):
 </div>
 """, unsafe_allow_html=True)
 
-    # Buttons: action button (Briefing or Report) + Lineup, side by side
-    btn_col1, btn_col2, btn_col3 = st.columns([3, 6, 3])
+    details_key = f"details_open_{key_prefix}_{mid}"
+    is_live = not is_finished and not is_upcoming
 
-    if is_upcoming:
-        btn_col1, btn_col2, btn_col3 = st.columns([2, 8, 2])
-        with btn_col1:
-            if st.button("⚡ Briefing", key=f"{key_prefix}_brief_{mid}"):
-                st.session_state[lineup_active_key] = False
-                with st.spinner("Analysing fixture..."):
-                    result = api_get(f"/matches/{mid}/briefing")
-                if result and "error" not in result:
-                    st.session_state[modal_key] = ("briefing", result)
-                    st.session_state[active_key] = True
-                elif result:
-                    st.error(result["error"])
-        with btn_col3:
-            if st.button("🗒 Lineup", key=f"{key_prefix}_lineup_{mid}"):
-                st.session_state[active_key] = False
-                with st.spinner("Fetching lineup..."):
-                    result = api_get(f"/matches/{mid}/lineup")
-                if result and "error" not in result:
-                    st.session_state[lineup_key] = result
-                    st.session_state[lineup_active_key] = True
-                elif result:
-                    st.error(result["error"])
+    # Single details button, bottom left
+    btn_col1, _ = st.columns([2, 10])
+    with btn_col1:
+        btn_label = "✕ Details" if st.session_state.get(details_key) else "⚡ Details"
+        if st.button(btn_label, key=f"{key_prefix}_details_{mid}"):
+            st.session_state[details_key] = not st.session_state.get(details_key, False)
+            st.rerun()
 
-    elif is_finished:
-        btn_col1, btn_col2, btn_col3 = st.columns([2, 8, 2])
-        with btn_col1:
-            if st.button("📋 Report", key=f"{key_prefix}_report_{mid}"):
-                st.session_state[lineup_active_key] = False
-                with st.spinner("Compiling match report..."):
-                    result = api_get(f"/matches/{mid}/report")
-                if result and "error" not in result:
-                    st.session_state[modal_key] = ("report", result)
-                    st.session_state[active_key] = True
-                elif result:
-                    st.error(result["error"])
-        with btn_col3:
-            if st.button("🗒 Lineup", key=f"{key_prefix}_lineup_{mid}"):
-                st.session_state[active_key] = False
-                with st.spinner("Fetching lineup..."):
-                    result = api_get(f"/matches/{mid}/lineup")
-                if result and "error" not in result:
-                    st.session_state[lineup_key] = result
-                    st.session_state[lineup_active_key] = True
-                elif result:
-                    st.error(result["error"])
-
-    else:
-        # Live match — only lineup button, pushed to far right
-        btn_col1, btn_col2 = st.columns([10, 2])
-        with btn_col2:
-            if st.button("🗒 Lineup", key=f"{key_prefix}_lineup_{mid}"):
-                st.session_state[active_key] = False
-                with st.spinner("Fetching lineup..."):
-                    result = api_get(f"/matches/{mid}/lineup")
-                if result and "error" not in result:
-                    st.session_state[lineup_key] = result
-                    st.session_state[lineup_active_key] = True
-                elif result:
-                    st.error(result["error"])
+    # Sub-buttons revealed on click
+    if st.session_state.get(details_key):
+        if is_live:
+            sub1, _ = st.columns([2, 10])
+            with sub1:
+                if st.button("🗒 Lineup", key=f"{key_prefix}_lineup_{mid}"):
+                    st.session_state[active_key] = False
+                    with st.spinner("Fetching lineup..."):
+                        result = api_get(f"/matches/{mid}/lineup")
+                    if result and "error" not in result:
+                        st.session_state[lineup_key] = result
+                        st.session_state[lineup_active_key] = True
+                    elif result:
+                        st.error(result["error"])
+        else:
+            sub1, sub2, _ = st.columns([2, 2, 8])
+            with sub1:
+                action_label = "⚡ Briefing" if is_upcoming else "📋 Report"
+                if st.button(action_label, key=f"{key_prefix}_action_{mid}"):
+                    if is_upcoming:
+                        st.session_state[lineup_active_key] = False
+                        with st.spinner("Analysing fixture..."):
+                            result = api_get(f"/matches/{mid}/briefing")
+                        if result and "error" not in result:
+                            st.session_state[modal_key] = ("briefing", result)
+                            st.session_state[active_key] = True
+                        elif result:
+                            st.error(result["error"])
+                    else:
+                        st.session_state[lineup_active_key] = False
+                        with st.spinner("Compiling match report..."):
+                            result = api_get(f"/matches/{mid}/report")
+                        if result and "error" not in result:
+                            st.session_state[modal_key] = ("report", result)
+                            st.session_state[active_key] = True
+                        elif result:
+                            st.error(result["error"])
+            with sub2:
+                if st.button("🗒 Lineup", key=f"{key_prefix}_lineup_{mid}"):
+                    st.session_state[active_key] = False
+                    with st.spinner("Fetching lineup..."):
+                        result = api_get(f"/matches/{mid}/lineup")
+                    if result and "error" not in result:
+                        st.session_state[lineup_key] = result
+                        st.session_state[lineup_active_key] = True
+                    elif result:
+                        st.error(result["error"])
 
     # ── AI modal (briefing / report) ───────────────────────────────
     if st.session_state.get(active_key) and modal_key in st.session_state:
@@ -735,6 +720,7 @@ with tab3:
                 st.markdown(f'<div class="section-label">{date_key}</div>', unsafe_allow_html=True)
                 for m in by_date[date_key]:
                     render_match_card(m, key_prefix="reports")
+
 
 # ══════════════════════════════════════════════════════════════════
 # TAB 4 — FAN DEBATE
