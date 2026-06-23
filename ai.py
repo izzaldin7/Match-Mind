@@ -4,6 +4,7 @@ import os
 from utils import (
     format_standings_for_prompt,
     format_qualification_scenarios_for_prompt,
+    get_qualification_status,
     get_match_context,
     get_head_to_head,
     get_team_tournament_form,
@@ -115,17 +116,11 @@ def build_post_match_context(home_team, away_team, home_score, away_score, stage
                 team = team_row["team"]
                 if team not in (home_team, away_team):
                     continue
-                pts = team_row["points"]
-                played = team_row["played"]
-                remaining = 3 - played
-                if pts >= 6:
-                    qualification_notes.append(
-                        f"{team} have qualified for the Round of 32 with this result."
-                    )
-                elif pts + (remaining * 3) < 4:
-                    qualification_notes.append(
-                        f"{team} have been eliminated from the tournament with this result."
-                    )
+                status = get_qualification_status(team_row)
+
+                qualification_notes.append(
+                    f"{team}: {status}"
+                )
         context["qualification_notes"] = "\n".join(qualification_notes) if qualification_notes else None
 
     elif group:
@@ -222,7 +217,8 @@ def generate_match_briefing(home_team, away_team, match_date, stage, group=None,
       involvements are listed above, name the players and their tallies — this
       is mandatory. Make clear these are tournament totals, not match-specific.
       Never imply a player scored in a specific match unless explicitly stated.
-      If standout performer data from each team's most recent match is listed,
+      If standout performer or a player who scored 2 or more goals in the last
+      match's data from each team's most recent match is listed,
       weave that player and performance in too, making clear it refers to that
       one previous match, not the tournament as a whole. Frame this section
       around a live question: is this team trending toward something, or due
@@ -344,14 +340,34 @@ def generate_post_match_report(home_team, away_team, home_score, away_score, sta
       lost, rather than listing them as a separate ledger.
     - A personnel paragraph using the listed lineups, formations, starters,
       and substitutes where present.
-    - Standout performers paragraph for both teams using the box score data — name the top-rated
-      player(s) and explain specifically what they did to earn that rating. Use the supporting
-      stats (goals, assists, xG, xA, dribbles completed, duels won, key passes, passing accuracy,
-      saves, tackles/interceptions, fouls won) to justify the number, but only cite the stats that
-      meaningfully explain it — a 9.0 rating built on a hat-trick does not need its tackle count
-      mentioned, while a 9.0 rating with zero goals should be explained through dribbles, defensive
-      actions, duels, or passing instead. Do not dump every stat listed for a player. Only reference
-      players and stats explicitly present in the box score data above.
+    - Standout performers paragraph for both teams using the box score data. Name two highest-rated
+      player(s) for each team and explain WHY they earned that rating using the most relevant statistics available.
+
+      Use role-appropriate evidence:
+
+      • For forwards and wingers: prioritize goals, assists, shots on target, xG, xA,
+        dribbles completed, successful take-ons, key passes, and chances created.
+
+      • For attacking midfielders and creators: prioritize assists, key passes,
+        chances created, passing accuracy, xA, dribbles, and progressive contributions.
+
+      • For central midfielders: prioritize passing accuracy, duels won,
+        recoveries, interceptions, tackles, and chance creation.
+
+      • For defenders: prioritize tackles, interceptions, clearances,
+        aerial duels won, blocks, and passing contribution when notable.
+
+      • For goalkeepers: prioritize saves, save percentage, goals prevented,
+        claims, punches, and distribution if relevant.
+
+      Never ignore players who has scored two or more goals. Their names must be
+      mentioned first in case they have contributed for the win. Then mention the other
+      standout perfomers. Always mention their match ratings too to solidify the case, 
+      along with the relevant statistics that support the rating.
+      Use only the statistics that genuinely explain the performance.
+      Do not list numbers mechanically. Build an argument for why the player
+      was influential. Only reference players and statistics explicitly present in the box
+      score data listed above.
     - A group-standings paragraph explaining what the result means for both teams,
       based strictly on the standings table above. If qualification updates are
       listed above, include them naturally here — e.g. "With this win, Mexico
@@ -375,6 +391,9 @@ def generate_post_match_report(home_team, away_team, home_score, away_score, sta
       create a match narrative from imagination.
     - Only mention player names, referees, or venues that explicitly appear in
       the data above. Do not recall, invent, or assume any names.
+    - When discussing standout performers, prefer quality over quantity.
+      Two to four carefully chosen supporting statistics are more valuable
+      than listing every number available in the box score.
     - Do not describe player movements, build-up play, pressing patterns, or
       passage of play that are not explicitly listed in the match data. Only
       the events listed (goals, cards, substitutions, VAR decisions) happened

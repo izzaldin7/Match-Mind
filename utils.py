@@ -303,6 +303,106 @@ def get_group_standings(group_name, exclude_match_id=None, up_to_date=None):
 
     return sorted(standings.values(), key=lambda x: (x["points"], x["gd"], x["gf"]), reverse=True)
 
+def get_all_group_standings(exclude_match_id=None):
+    session = Session()
+
+    groups = (
+        session.query(Match.group_name)
+        .filter(Match.group_name.isnot(None))
+        .distinct()
+        .all()
+    )
+
+    session.close()
+
+    all_groups = {}
+
+    for (group_name,) in groups:
+        standings = get_group_standings(
+            group_name,
+            exclude_match_id=exclude_match_id
+        )
+
+        if standings:
+            all_groups[group_name] = standings
+
+    return all_groups
+
+def get_third_place_table(exclude_match_id=None):
+    all_groups = get_all_group_standings(
+        exclude_match_id=exclude_match_id
+    )
+
+    third_place_teams = []
+
+    for group_name, standings in all_groups.items():
+        if len(standings) >= 3:
+            third = standings[2]
+
+            third_place_teams.append({
+                "group": group_name,
+                "team": third["team"],
+                "points": third["points"],
+                "gd": third["gd"],
+                "gf": third["gf"]
+            })
+
+    third_place_teams.sort(
+        key=lambda x: (
+            x["points"],
+            x["gd"],
+            x["gf"]
+        ),
+        reverse=True
+    )
+
+    return third_place_teams
+
+def can_still_reach_best_third_place(row):
+    played = row["played"]
+    pts = row["points"]
+
+    remaining = max(0, 3 - played)
+
+    max_possible_points = pts + (remaining * 3)
+
+    # Any team that can still reach 4+ points
+    # is definitely alive in a 12-group format.
+    if max_possible_points >= 4:
+        return True
+
+    # A team that can still reach 3 points
+    # cannot be ruled out mathematically.
+    if max_possible_points == 3:
+        return True
+
+    return False
+
+def get_qualification_status(row):
+    played = row["played"]
+    pts = row["points"]
+
+    remaining = 3 - played
+    max_possible = pts + (remaining * 3)
+
+    if pts >= 6:
+        return "ALREADY QUALIFIED for the Round of 32 (top-two spot secured)"
+
+    if pts == 4 and played == 2:
+        return "likely qualified but not yet mathematically confirmed (strong position)"
+
+    if not can_still_reach_best_third_place(row):
+        return "ELIMINATED"
+
+    if played == 2 and max_possible <= 3:
+        return (
+            "STILL ALIVE. Automatic qualification is no longer possible, "
+            "but qualification through the best third-placed teams route "
+            "remains mathematically possible."
+        )
+
+    return "qualification still to be decided"
+
 
 def format_standings_for_prompt(group_name, exclude_match_id=None, up_to_date=None):
     standings = get_group_standings(group_name, exclude_match_id=exclude_match_id, up_to_date=up_to_date)
@@ -364,16 +464,7 @@ def format_qualification_scenarios_for_prompt(group_name, home_team, away_team, 
         gd = row["gd"]
         max_possible = pts + (remaining * 3)
 
-        if pts >= 6:
-            status = "ALREADY QUALIFIED for the Round of 32 (top-two spot secured)"
-        elif pts == 4 and played == 2:
-            status = "likely qualified but not yet mathematically confirmed (strong position)"
-        elif max_possible < 4:
-            status = "ELIMINATED — cannot finish in top two or realistically claim a third-place spot"
-        elif max_possible < 6 and row.get("won", 0) == 0 and played == 2:
-            status = "third-place route only — result here and results elsewhere must go their way"
-        else:
-            status = "qualification still to be decided"
+        status = get_qualification_status(row)
 
         lines.append(f"  {team}: {pts} pt(s), played {played}, GD {gd} — {status}.")
 
@@ -384,7 +475,12 @@ def format_qualification_scenarios_for_prompt(group_name, home_team, away_team, 
             if gd < 0:
                 lines.append(f"    Negative GD means margin of victory matters if it comes to tiebreakers.")
 
-    lines.append("  Note: third-place qualification depends on results across all 12 groups and cannot be modelled here.")
+    lines.append(
+    "  Note: third-place qualification is determined across all 12 groups. "
+    "This analysis can identify teams still alive via the third-place route "
+    "but cannot determine whether a third-placed team has mathematically "
+    "secured or lost one of the eight qualifying spots."
+)
     return "\n".join(lines)
 
 
