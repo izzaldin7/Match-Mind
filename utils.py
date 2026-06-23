@@ -39,18 +39,14 @@ TEAM_NAME_ALIASES = {
 }
 
 # ── In-memory cache ────────────────────────────────────────────────
-# NOTE: everything in this dict still resets on server restart. Raw
-# Highlightly data (match details, box scores) lives here. Generated
-# briefing/report TEXT is persisted separately via the DB-backed
-# get_cached_content/save_cached_content helpers below, so that part
-# survives restarts (e.g. when swapping API keys).
 _cache = {
     "world_cup_matches": None,
     "world_cup_matches_timestamp": 0,
     "match_details": {},
     "match_id_lookup": {},
     "head_to_head": {},
-    "box_scores": {}
+    "box_scores": {},
+    "lineups": {}          # ← new: keyed by highlightly_match_id
 }
 
 _tournament_stats_cache = {
@@ -69,20 +65,9 @@ HIGHLIGHTLY_MATCHES_TTL_SECONDS = 300
 BRIEFING_CACHE_TTL_SECONDS = 60 * 60 * 2
 
 
-# ── Persistent (DB-backed) cache for generated briefings/reports ───
+# ── Persistent (DB-backed) cache for generated briefings/reports/lineups ──
 
 def get_cached_content(match_id, content_type, ttl_seconds=None):
-    """
-    Look up a previously generated briefing/report for this match.
-    Returns the parsed response dict, or None if nothing cached (or
-    if it's older than ttl_seconds, when a ttl is given).
-
-    Pass ttl_seconds=None (the default) for content that never goes
-    stale once generated — e.g. post-match reports, since a finished
-    match's facts don't change. Pass a ttl for content that CAN go
-    stale — e.g. pre-match briefings, since standings/qualification
-    scenarios can shift before kickoff.
-    """
     session = Session()
     try:
         row = (
@@ -112,12 +97,6 @@ def get_cached_content(match_id, content_type, ttl_seconds=None):
 
 
 def save_cached_content(match_id, content_type, result):
-    """
-    Persist a generated briefing/report so future requests for the
-    same match + type skip both context-building and the Groq call.
-    Replaces any prior row for this (match_id, content_type) pair —
-    we only ever want the latest version, not a history.
-    """
     session = Session()
     try:
         session.query(GeneratedContent).filter_by(
@@ -951,6 +930,113 @@ def get_team_tournament_form(team_name, exclude_match_id=None):
 
     return "\n".join(lines)
 
+
+# ── Lineup fetch & format ──────────────────────────────────────────
+
+def fetch_lineup(highlightly_match_id):
+    """
+    Fetch lineup data from Highlightly for the given match id.
+    Returns the raw dict {homeTeam: {...}, awayTeam: {...}} or None.
+    Cached in _cache["lineups"] — never re-fetched once present.
+    """
+    if highlightly_match_id in _cache["lineups"]:
+        cached = _cache["lineups"][highlightly_match_id]
+        if cached is not None:
+            return cached
+
+    data = _hl_get(f"lineups/{highlightly_match_id}")
+
+    # API returns a plain dict for lineups
+    if isinstance(data, dict) and ("homeTeam" in data or "awayTeam" in data):
+        _cache["lineups"][highlightly_match_id] = data
+        return data
+
+    # Sometimes wrapped in a list
+    if isinstance(data, list) and data:
+        item = data[0]
+        if isinstance(item, dict) and ("homeTeam" in item or "awayTeam" in item):
+            _cache["lineups"][highlightly_match_id] = item
+            return item
+
+    _cache["lineups"][highlightly_match_id] = None
+    return None
+
+
+def format_lineup_for_cache(lineup_data, home_team, away_team):
+    """
+    Normalise raw lineup API response into a clean dict the frontend renders.
+    Returns None if no useful data is present.
+
+    Output shape per team:
+    {
+        "name": "Brazil",
+        "formation": "4-3-3",
+        "initialLineup": [
+            [{"name": "...", "number": 1, "position": "Goalkeeper"}],
+            [{"name": "...", "number": 4, ...}, ...],
+            ...
+        ],
+        "substitutes": [{"name": "...", "number": 7, "position": "..."}]
+    }
+    """
+    if not lineup_data:
+        return None
+
+    def _normalise_team(raw, fallback_name):
+        if not raw:
+            return None
+
+        # Team name: prefer explicit name field, then nested team dict, then fallback
+        team_obj = raw.get("team") or {}
+        team_name = (
+            raw.get("name")
+            if raw.get("name") and not raw.get("name", "").startswith("http")
+            else team_obj.get("name") or fallback_name
+        )
+
+        players_rows = raw.get("initialLineup") or []
+        normalised_rows = []
+        for row in players_rows:
+            if not isinstance(row, list):
+                continue
+            norm_row = []
+            for p in row:
+                if isinstance(p, dict):
+                    norm_row.append({
+                        "name": p.get("name") or p.get("fullName", ""),
+                        "number": p.get("number") or p.get("shirtNumber"),
+                        "position": p.get("position", "")
+                    })
+            if norm_row:
+                normalised_rows.append(norm_row)
+
+        subs = []
+        for s in (raw.get("substitutes") or []):
+            if isinstance(s, dict):
+                subs.append({
+                    "name": s.get("name") or s.get("fullName", ""),
+                    "number": s.get("number") or s.get("shirtNumber"),
+                    "position": s.get("position", "")
+                })
+
+        return {
+            "name": team_name,
+            "formation": raw.get("formation") or "",
+            "initialLineup": normalised_rows,
+            "substitutes": subs
+        }
+
+    home = _normalise_team(lineup_data.get("homeTeam"), home_team)
+    away = _normalise_team(lineup_data.get("awayTeam"), away_team)
+
+    if not home and not away:
+        return None
+
+    return {"home": home, "away": away}
+
+
+# ── Box score ──────────────────────────────────────────────────────
+
 def fetch_box_score(highlightly_match_id):
     if highlightly_match_id in _cache["box_scores"]:
         cached = _cache["box_scores"][highlightly_match_id]
@@ -1034,8 +1120,6 @@ def format_box_score_for_prompt(box_score_data, home_team, away_team):
             except (TypeError, ValueError):
                 rating_val = 0
 
-            # Only include notable players (high rating, goal involvement, strong underlying numbers,
-            # a card, or a goalkeeper-relevant stat)
             is_notable = (
                 rating_val >= 7.0
                 or goals > 0
@@ -1070,7 +1154,6 @@ def format_box_score_for_prompt(box_score_data, home_team, away_team):
             if fouled_others: stats_parts.append(f"fouls committed: {fouled_others}")
             if offsides: stats_parts.append(f"offsides: {offsides}")
 
-            # Goalkeeper-specific
             if position and "goalkeeper" in position.lower():
                 if goals_saved: stats_parts.append(f"saves: {goals_saved}")
                 if goals_conceded: stats_parts.append(f"goals conceded: {goals_conceded}")
@@ -1112,18 +1195,14 @@ def build_tournament_cache():
             match.home_team, match.away_team, match.match_date
         )
 
-        # Only use already-cached data — never make a new API call
         box_score_data = _cache["box_scores"].get(highlightly_id) if highlightly_id else None
         match_detail = _cache["match_details"].get(highlightly_id) if highlightly_id else None
 
-        # Mark as processed regardless — if data isn't cached yet,
-        # it'll get picked up next time someone generates a report for this match
         _tournament_stats_cache["matches_processed"].add(match.match_id)
 
         if not box_score_data and not match_detail:
             continue
 
-        # --- Player stats from box score ---
         if box_score_data:
             for team_data in box_score_data:
                 t_name = (team_data.get("team") or {}).get("name", "")
@@ -1186,7 +1265,6 @@ def build_tournament_cache():
                     except (TypeError, ValueError):
                         pass
 
-        # --- Team stats from DB + cached match detail ---
         for team_name in (match.home_team, match.away_team):
             if team_name not in _tournament_stats_cache["teams"]:
                 _tournament_stats_cache["teams"][team_name] = {
@@ -1270,16 +1348,12 @@ def get_player_tournament_stats(player_name):
 def _match_player_name(name, candidates):
     if not name:
         return None
-    # exact match first
     if name in candidates:
         return name
-    # case-insensitive exact match
     lowered = name.strip().lower()
     for candidate in candidates:
         if candidate.lower() == lowered:
             return candidate
-    # substring match as a fallback (e.g. "Mbappe" -> "Kylian Mbappé")
-    # note: this won't match accented vs unaccented names
     for candidate in candidates:
         if lowered in candidate.lower() or candidate.lower() in lowered:
             return candidate
@@ -1442,29 +1516,25 @@ def format_recent_standout_performers_for_prompt(home_team, away_team, match_dat
     return "\n".join(lines) if found else None
 
 def fetch_player_summary(player_name):
-    # Search by name
     data = _hl_get("players", {"name": player_name, "limit": 5})
     players = _as_list(data)
-    
+
     if not players:
         return None
-    
-    # Take first match
+
     player = players[0]
     player_id = player.get("id")
     if not player_id:
         return None
-    
-    # Fetch full summary
+
     summary_data = _hl_get(f"players/{player_id}")
     summary = _as_list(summary_data)
     summary = summary[0] if summary else {}
-    
-    # Fetch career stats
+
     stats_data = _hl_get(f"players/{player_id}/statistics")
     stats = _as_list(stats_data)
     stats = stats[0] if stats else {}
-    
+
     return {
         "id": player_id,
         "name": summary.get("name", player_name),

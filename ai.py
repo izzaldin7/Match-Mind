@@ -262,9 +262,6 @@ def generate_match_briefing(home_team, away_team, match_date, stage, group=None,
       Do not write phrases like "no prior data is available" or "both teams are
       yet to play" — simply omit those sections and focus on standings, h2h
       history, tactical outlook, and prediction.
-    - Do not describe HOW a goal was scored (header, volley, tap-in, driven shot,
-      curled finish) unless that information is explicitly stated in the match data.
-      Simply say the player scored, or reference the assist if one is listed.
     - Only mention player names that explicitly appear in the data provided above.
       Do not recall, assume, or invent any player names from your training data.
     - Do not invent injuries, suspensions, tactical systems, lineups, or
@@ -378,6 +375,15 @@ def generate_post_match_report(home_team, away_team, home_score, away_score, sta
       create a match narrative from imagination.
     - Only mention player names, referees, or venues that explicitly appear in
       the data above. Do not recall, invent, or assume any names.
+    - Do not describe player movements, build-up play, pressing patterns, or
+      passage of play that are not explicitly listed in the match data. Only
+      the events listed (goals, cards, substitutions, VAR decisions) happened
+      as far as this report is concerned.
+    - Do not describe HOW a goal was scored (header, volley, tap-in, driven
+      shot, curled finish, slotted past the keeper) unless explicitly stated
+      in the match data. Say the player scored, reference the assist if listed,
+      and move on. In case of a penalty miss, do not describe how it was missed
+      (goalkeeper save, hit the post, out of target).
     - Do not invent events, cards, substitutions, or stats not present in the data.
     - Do not characterize the disciplinary tone of the match beyond what the
       data explicitly shows.

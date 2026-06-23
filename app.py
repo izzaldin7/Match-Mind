@@ -72,9 +72,9 @@ st.markdown("""
     .match-card {
         background: #0f1525;
         border: 1px solid #1a2035;
-        border-radius: 4px;
+        border-radius: 4px 4px 0 0;
         padding: 0.75rem 1.5rem;
-        margin-bottom: 0.35rem;
+        margin-bottom: 0;
         transition: border-color 0.2s;
     }
     .match-card:hover { border-color: #FFD70030; }
@@ -220,12 +220,18 @@ st.markdown("""
         border-bottom: 1px solid #1a2035;
         margin-bottom: 0.25rem;
     }
-            
+
     div[data-testid="stHorizontalBlock"] {
         gap: 0 !important;
-        margin-top: -0.5rem !important;
+        margin-top: -0.9rem !important;
         margin-bottom: 0.75rem !important;
+        background: #0f1525 !important;
+        border: 1px solid #1a2035 !important;
+        border-top: none !important;
+        border-radius: 0 0 4px 4px !important;
+        padding: 0 !important;
     }
+
     div[data-testid="stHorizontalBlock"] div[data-testid="stButton"] button {
         border-top: none !important;
         border-top-left-radius: 0 !important;
@@ -235,13 +241,16 @@ st.markdown("""
         font-size: 0.65rem !important;
         color: #5a6070 !important;
         border-color: #1a2035 !important;
+        white-space: nowrap !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
     }
-    div[data-testid="stHorizontalBlock"] div[data-testeid="stButton"] button:hover {
-    color: #FFD700 !important;
-    border-color: #FFD70040 !important;
+    div[data-testid="stHorizontalBlock"] div[data-testid="stButton"] button:hover {
+        color: #FFD700 !important;
+        border-color: #FFD70040 !important;
     }
     div[data-testid="column"] + div[data-testid="column"] {
-    padding-left: 1rem !important;
+        padding-left: 1rem !important;
     }
     .s-team { flex: 3; color: #e8eaf0; font-weight: 600; }
     .s-team-gold { flex: 3; color: #FFD700; font-weight: 600; }
@@ -266,8 +275,8 @@ def api_get(endpoint):
     except Exception as e:
         st.error(f"Unexpected error: {e}")
         return None
-    
-    
+
+
 def api_post(endpoint, payload):
     try:
         r = requests.post(f"{API_BASE}{endpoint}", json=payload, timeout=120)
@@ -285,7 +294,7 @@ def api_post(endpoint, payload):
     except Exception as e:
         st.error(f"Unexpected error: {e}")
         return None
-    
+
 
 def status_class(status):
     s = status.upper()
@@ -344,6 +353,116 @@ def render_standings(standings):
     st.markdown(f'<div class="standings-wrap">{header}{rows}</div>', unsafe_allow_html=True)
 
 
+def _short_name(full_name):
+    """Shorten player name to fit in the token: last name or abbrev first name."""
+    if not full_name:
+        return ""
+    parts = full_name.strip().split()
+    if len(parts) == 1:
+        return parts[0][:10]
+    # First initial + last name if long, else just last name
+    last = parts[-1]
+    if len(last) <= 9:
+        return last
+    return last[:9]
+
+
+def render_lineup_card(lineup_data, home_team, away_team):
+    home = lineup_data.get("home") or {}
+    away = lineup_data.get("away") or {}
+
+    home_name = home.get("name") or home_team
+    away_name = away.get("name") or away_team
+    home_formation = home.get("formation", "")
+    away_formation = away.get("formation", "")
+
+    def flatten_rows(rows):
+        players = []
+        for row in rows:
+            if isinstance(row, list):
+                players.extend(row)
+        return players
+
+    home_starters = flatten_rows(home.get("initialLineup", []))
+    away_starters = flatten_rows(away.get("initialLineup", []))
+    home_subs = home.get("substitutes", [])
+    away_subs = away.get("substitutes", [])
+
+    # Header always shows regardless
+    st.markdown(f"""
+<div style="text-align:center;margin-bottom:1.5rem;">
+    <div style="font-family:'Bebas Neue',sans-serif;font-size:1.8rem;letter-spacing:3px;color:#ffffff;">
+        {home_name} <span style="color:#5a6070;font-size:1rem;">vs</span> {away_name}
+    </div>
+    <div style="font-family:'Inter',sans-serif;font-size:0.65rem;color:#5a6070;letter-spacing:3px;text-transform:uppercase;margin-top:0.25rem;">
+        Starting Lineups · 2026 FIFA World Cup
+    </div>
+</div>
+""", unsafe_allow_html=True)
+
+    # If neither team has starters yet, show not available
+    if not home_starters and not away_starters:
+        st.markdown("""
+<div style="text-align:center;padding:2rem;color:#5a6070;font-family:'Inter',sans-serif;font-size:0.85rem;letter-spacing:1px;">
+    Match lineups not available yet. Check back closer to kickoff.
+</div>
+""", unsafe_allow_html=True)
+        return
+
+    # Side by side columns
+    col_home, col_div, col_away = st.columns([5, 0.2, 5])
+
+    def render_team_column(col, team_name, formation, starters, subs):
+        with col:
+            badge = f'<span style="font-family:\'JetBrains Mono\',monospace;font-size:0.65rem;color:#5a6070;background:#0a0e1a;border:1px solid #1a2035;border-radius:2px;padding:0.1rem 0.5rem;letter-spacing:2px;">{formation}</span>' if formation else ""
+            st.markdown(f"""
+<div style="text-align:center;margin-bottom:0.75rem;">
+    <div style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;letter-spacing:3px;color:#FFD700;margin-bottom:0.3rem;">{team_name}</div>
+    {badge}
+</div>
+""", unsafe_allow_html=True)
+
+            # Starters
+            st.markdown('<div style="font-family:\'Inter\',sans-serif;font-size:0.6rem;letter-spacing:2px;text-transform:uppercase;color:#5a6070;margin-bottom:0.4rem;">Starting XI</div>', unsafe_allow_html=True)
+
+            for p in starters:
+                num = p.get("number") or "—"
+                name = p.get("name") or ""
+                pos = p.get("position") or ""
+                pos_color = "#FF8C00" if "goalkeeper" in pos.lower() else "#4a6fa5"
+                pos_short = pos[:3].upper() if pos else ""
+                st.markdown(f"""
+<div style="display:flex;align-items:center;gap:0.6rem;padding:0.3rem 0.5rem;border-bottom:1px solid #0f1525;">
+    <div style="font-family:'JetBrains Mono',monospace;font-size:0.65rem;color:{pos_color};width:20px;text-align:center;flex-shrink:0;">{num}</div>
+    <div style="font-family:'Inter',sans-serif;font-size:0.8rem;color:#e8eaf0;flex:1;">{name}</div>
+    <div style="font-family:'Inter',sans-serif;font-size:0.58rem;color:#5a6070;letter-spacing:0.5px;">{pos_short}</div>
+</div>
+""", unsafe_allow_html=True)
+
+            # Subs
+            if subs:
+                st.markdown('<div style="font-family:\'Inter\',sans-serif;font-size:0.6rem;letter-spacing:2px;text-transform:uppercase;color:#5a6070;margin-top:1rem;margin-bottom:0.4rem;">Substitutes</div>', unsafe_allow_html=True)
+                for s in subs:
+                    num = s.get("number") or "—"
+                    name = s.get("name") or ""
+                    pos = s.get("position") or ""
+                    pos_short = pos[:3].upper() if pos else ""
+                    st.markdown(f"""
+<div style="display:flex;align-items:center;gap:0.6rem;padding:0.25rem 0.5rem;border-bottom:1px solid #0a0e1a;">
+    <div style="font-family:'JetBrains Mono',monospace;font-size:0.65rem;color:#3a4060;width:20px;text-align:center;flex-shrink:0;">{num}</div>
+    <div style="font-family:'Inter',sans-serif;font-size:0.78rem;color:#8a8ea8;flex:1;">{name}</div>
+    <div style="font-family:'Inter',sans-serif;font-size:0.58rem;color:#5a6070;">{pos_short}</div>
+</div>
+""", unsafe_allow_html=True)
+
+    render_team_column(col_home, home_name, home_formation, home_starters, home_subs)
+
+    with col_div:
+        st.markdown('<div style="width:1px;background:#1a2035;min-height:400px;margin:0 auto;"></div>', unsafe_allow_html=True)
+
+    render_team_column(col_away, away_name, away_formation, away_starters, away_subs)
+
+
 def render_match_card(m, key_prefix=""):
     card_class, status_cls, status_label = status_class(m["status"])
     score = format_score(m.get("home_score"), m.get("away_score"), m["status"])
@@ -358,7 +477,9 @@ def render_match_card(m, key_prefix=""):
     is_upcoming = m["status"].upper() not in ("FINISHED", "IN_PLAY", "PAUSED", "HALFTIME")
     mid = m['match_id']
     modal_key = f"ai_result_{mid}"
+    lineup_key = f"lineup_result_{mid}"
     active_key = f"active_{key_prefix}_{mid}"
+    lineup_active_key = f"lineup_active_{key_prefix}_{mid}"
 
     # Match card HTML
     st.markdown(f"""
@@ -374,11 +495,14 @@ def render_match_card(m, key_prefix=""):
 </div>
 """, unsafe_allow_html=True)
 
-    # Buttons inside the card area
-    btn_col1, btn_col2, btn_col3 = st.columns([2, 2, 6])
+    # Buttons: action button (Briefing or Report) + Lineup, side by side
+    btn_col1, btn_col2, btn_col3 = st.columns([3, 6, 3])
+
     if is_upcoming:
+        btn_col1, btn_col2, btn_col3 = st.columns([2, 8, 2])
         with btn_col1:
             if st.button("⚡ Briefing", key=f"{key_prefix}_brief_{mid}"):
+                st.session_state[lineup_active_key] = False
                 with st.spinner("Analysing fixture..."):
                     result = api_get(f"/matches/{mid}/briefing")
                 if result and "error" not in result:
@@ -386,9 +510,22 @@ def render_match_card(m, key_prefix=""):
                     st.session_state[active_key] = True
                 elif result:
                     st.error(result["error"])
+        with btn_col3:
+            if st.button("🗒 Lineup", key=f"{key_prefix}_lineup_{mid}"):
+                st.session_state[active_key] = False
+                with st.spinner("Fetching lineup..."):
+                    result = api_get(f"/matches/{mid}/lineup")
+                if result and "error" not in result:
+                    st.session_state[lineup_key] = result
+                    st.session_state[lineup_active_key] = True
+                elif result:
+                    st.error(result["error"])
+
     elif is_finished:
+        btn_col1, btn_col2, btn_col3 = st.columns([2, 8, 2])
         with btn_col1:
             if st.button("📋 Report", key=f"{key_prefix}_report_{mid}"):
+                st.session_state[lineup_active_key] = False
                 with st.spinner("Compiling match report..."):
                     result = api_get(f"/matches/{mid}/report")
                 if result and "error" not in result:
@@ -396,8 +533,32 @@ def render_match_card(m, key_prefix=""):
                     st.session_state[active_key] = True
                 elif result:
                     st.error(result["error"])
+        with btn_col3:
+            if st.button("🗒 Lineup", key=f"{key_prefix}_lineup_{mid}"):
+                st.session_state[active_key] = False
+                with st.spinner("Fetching lineup..."):
+                    result = api_get(f"/matches/{mid}/lineup")
+                if result and "error" not in result:
+                    st.session_state[lineup_key] = result
+                    st.session_state[lineup_active_key] = True
+                elif result:
+                    st.error(result["error"])
 
-    # Modal display
+    else:
+        # Live match — only lineup button, pushed to far right
+        btn_col1, btn_col2 = st.columns([10, 2])
+        with btn_col2:
+            if st.button("🗒 Lineup", key=f"{key_prefix}_lineup_{mid}"):
+                st.session_state[active_key] = False
+                with st.spinner("Fetching lineup..."):
+                    result = api_get(f"/matches/{mid}/lineup")
+                if result and "error" not in result:
+                    st.session_state[lineup_key] = result
+                    st.session_state[lineup_active_key] = True
+                elif result:
+                    st.error(result["error"])
+
+    # ── AI modal (briefing / report) ───────────────────────────────
     if st.session_state.get(active_key) and modal_key in st.session_state:
         result_type, r = st.session_state[modal_key]
 
@@ -432,6 +593,22 @@ def render_match_card(m, key_prefix=""):
     {format_ai_text(r['report'])}
 </div>
 """, unsafe_allow_html=True)
+
+    # ── Lineup modal ───────────────────────────────────────────────
+    if st.session_state.get(lineup_active_key) and lineup_key in st.session_state:
+        r = st.session_state[lineup_key]
+
+        close_col, _ = st.columns([1, 9])
+        with close_col:
+            if st.button("✕ Close", key=f"close_lineup_{key_prefix}_{mid}"):
+                st.session_state[lineup_active_key] = False
+                st.rerun()
+
+        render_lineup_card(
+            r["lineup"],
+            r.get("home_team", m["home_team"]),
+            r.get("away_team", m["away_team"])
+        )
 
 
 # ── Header ─────────────────────────────────────────────────────────

@@ -17,7 +17,10 @@ from utils import (
     build_tournament_cache,
     get_cached_content,
     save_cached_content,
-    BRIEFING_CACHE_TTL_SECONDS
+    BRIEFING_CACHE_TTL_SECONDS,
+    find_highlightly_match_id,
+    fetch_lineup,
+    format_lineup_for_cache
 )
 from scheduler import start_scheduler
 
@@ -93,8 +96,6 @@ def get_match_briefing(match_id: int, session=Depends(get_db)):
     if match.match_date != str(date.today()):
         raise HTTPException(status_code=400, detail=f"Briefings are only available for today's matches. This match is scheduled for {match.match_date}.")
 
-    # Briefings CAN go stale before kickoff (standings/qualification/discipline
-    # can change), so this uses a TTL rather than caching forever.
     cached = get_cached_content(match_id, "briefing", ttl_seconds=BRIEFING_CACHE_TTL_SECONDS)
     if cached:
         return cached
@@ -131,8 +132,6 @@ def get_post_match_report(match_id: int, session=Depends(get_db)):
     if match.status not in ("FINISHED", "Finished"):
         raise HTTPException(status_code=400, detail=f"Match is not finished yet. Current status: {match.status}")
 
-    # Reports are cached forever (no ttl) — a finished match's facts don't
-    # change, so there's never a reason to regenerate one.
     cached = get_cached_content(match_id, "report")
     if cached:
         return cached
@@ -162,6 +161,72 @@ def get_post_match_report(match_id: int, session=Depends(get_db)):
         "data_used": data_used, "report": report
     }
     save_cached_content(match_id, "report", result)
+    return result
+
+
+# ── Lineup endpoint ────────────────────────────────────────────────
+
+@app.get("/matches/{match_id}/lineup")
+def get_match_lineup(match_id: int, session=Depends(get_db)):
+    """
+    Returns lineup data for any match (upcoming, live, or finished).
+    Available from ~30 min before kickoff per Highlightly docs.
+    Cached permanently once retrieved — lineups never change after release.
+    """
+    match = session.query(Match).filter_by(match_id=match_id).first()
+    if not match:
+        raise HTTPException(status_code=404, detail="Match not found")
+
+    # Check permanent cache first (lineups never change once confirmed)
+    cached = get_cached_content(match_id, "lineup")
+    if cached:
+        return cached
+
+    # Resolve Highlightly match ID
+    highlightly_id = find_highlightly_match_id(
+        match.home_team, match.away_team, match.match_date
+    )
+    if not highlightly_id:
+        raise HTTPException(
+            status_code=404,
+            detail="This match could not be matched to Highlightly data. Try again closer to kickoff."
+        )
+
+    # Fetch and normalise
+    raw = fetch_lineup(highlightly_id)
+    if not raw:
+        raise HTTPException(
+            status_code=404,
+            detail="Lineup not available yet. Lineups are released ~30 minutes before kickoff."
+        )
+
+    lineup = format_lineup_for_cache(raw, match.home_team, match.away_team)
+    if not lineup:
+        raise HTTPException(
+            status_code=404,
+            detail="Lineup data was returned but could not be parsed. Try again later."
+        )
+
+    result = {
+        "match_id": match_id,
+        "home_team": match.home_team,
+        "away_team": match.away_team,
+        "date": match.match_date,
+        "status": match.status,
+        "lineup": lineup
+    }
+
+    # Only cache permanently if the match is finished or lineup is clearly complete
+    # (both teams have starters). For upcoming/live matches we still cache briefly
+    # by using the same save_cached_content — a subsequent request within the same
+    # server session hits the in-memory _cache["lineups"] anyway.
+    home_rows = lineup.get("home", {}).get("initialLineup", [])
+    away_rows = lineup.get("away", {}).get("initialLineup", [])
+    is_complete = len(home_rows) >= 2 and len(away_rows) >= 2
+
+    if match.status in ("FINISHED", "Finished") or is_complete:
+        save_cached_content(match_id, "lineup", result)
+
     return result
 
 
