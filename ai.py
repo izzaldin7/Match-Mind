@@ -513,7 +513,8 @@ def generate_player_debate(player_names, context_str, position_groups=None):
 {focus}
 
     Write a sharp, analytical fan debate breakdown. Structure it as follows:
-    - An opening line that frames what makes this comparison genuinely interesting or contested.
+    - An opening paragraph that frames what makes this comparison genuinely interesting or contested.
+      This should be 2-3 sentences long.
     - A dedicated paragraph for each player, using their name as the section heading.
       Cover what the numbers say about their tournament impact, their role, their efficiency,
       and what separates them from the others in this comparison. Apply the positional
@@ -529,7 +530,10 @@ def generate_player_debate(player_names, context_str, position_groups=None):
     - If a player has limited appearances or missing stats, factor that into the verdict
       rather than ignoring it.
     - No exclamation marks. Analytical, assured tone throughout.
-    - Write between 300-450 words. Each player section is its own paragraph.
+    - Match rating may be used as supporting evidence but never as the sole basis 
+      for the verdict. The verdict must be argued from specific performance statistics 
+      first, with rating used only to corroborate.
+    - Write between 500-600 words. Each player section is its own paragraph.
     - No clichés. Every sentence must say something specific and grounded in the data.
     - Do not reference xG or xA — that data is not available for this tournament.
       Judge goal threat through shots, shots on target, and goals scored instead.
@@ -575,7 +579,7 @@ def generate_team_debate(team_names, context_str):
     - Only use the data provided above. Do not reference past tournaments, squad names
       not present in the data, or anything outside this tournament.
     - No exclamation marks. Analytical, confident tone throughout.
-    - Write between 300-450 words. Each team section is its own paragraph.
+    - Write between 500-600 words. Each team section is its own paragraph.
     - No clichés. Every sentence must say something specific and grounded in the data.
     """
     try:
