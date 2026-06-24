@@ -53,6 +53,10 @@ def refresh_match_data():
 
         session.commit()
         print("Match data refreshed successfully.")
+        try:
+            build_tournament_cache()
+        except Exception as cache_error:
+            print(f"Match data saved, but tournament cache update failed: {cache_error}")
     except Exception as e:
         print(f"Error updating database: {e}")
         session.rollback()

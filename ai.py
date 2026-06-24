@@ -360,6 +360,18 @@ def generate_post_match_report(home_team, away_team, home_score, away_score, sta
       • For goalkeepers: prioritize saves, save percentage, goals prevented,
         claims, punches, and distribution if relevant.
 
+      Good example:
+      "Haaland's two goals will dominate the headlines, but his four shots on target
+       and 1.3 xG illustrate how consistently he occupied dangerous positions."
+
+      Good example:
+      "Although he did not score, Messi completed six dribbles, created four chances
+      and supplied two key passes, repeatedly carrying Argentina into advanced areas."
+
+      Bad example:
+      "Haaland scored two goals, had four shots, one tackle, one clearance,
+      37 touches and 12 passes."
+
       Never ignore players who has scored two or more goals. Their names must be
       mentioned first in case they have contributed for the win. Then mention the other
       standout perfomers. Always mention their match ratings too to solidify the case, 
@@ -429,7 +441,63 @@ def generate_post_match_report(home_team, away_team, home_score, away_score, sta
     except Exception as e:
         raise RuntimeError(f"Failed to generate content via Groq: {e}")
     
-def generate_player_debate(player_names, context_str):
+def generate_player_debate(player_names, context_str, position_groups=None):
+    # Determine the dominant position group for prompt focus
+    group = "attacker"
+    if position_groups:
+        unique = set(g for g in position_groups if g != "unknown")
+        if "goalkeeper" in unique:
+            group = "goalkeeper"
+        elif "defender" in unique:
+            group = "defender"
+        elif "midfielder" in unique and "attacker" not in unique:
+            group = "midfielder"
+        elif "attacker" in unique and "midfielder" not in unique:
+            group = "attacker"
+        else:
+            group = "midfielder_attacker"
+
+    if group == "goalkeeper":
+        focus = """
+    These are goalkeepers. The primary statistics are saves, goals conceded,
+    and match rating. Since goalkeeper-specific data is limited, also factor in
+    tackles, interceptions, and duels won as supplementary evidence of their
+    sweeper-keeper contribution and overall involvement. Minutes played matters
+    for context. Do not discuss dribbles, key passes, or shots as attacking
+    contributions — they are irrelevant to this comparison."""
+
+    elif group == "defender":
+        focus = """
+    These are defenders. Lead with defensive statistics: tackles, interceptions,
+    duels won, and minutes played. Goals, assists, key passes, and passing accuracy
+    are genuine differentiators and should be discussed as meaningful bonuses —
+    but they are secondary to defensive output. Do not treat a defender's attacking
+    contribution as the primary measure of their tournament."""
+
+    elif group == "midfielder":
+        focus = """
+    These are midfielders. Lead with creativity and control: key passes, assists,
+    pass accuracy, and duels won. Goals scored are a significant bonus. Defensive
+    contributions — tackles and interceptions — matter and should be discussed.
+    These are all-round players; assess them across all dimensions, but weight
+    creativity and passing output most heavily."""
+
+    elif group == "attacker":
+        focus = """
+    These are attackers. Lead with goals, shots on target, and shot volume.
+    Assists and key passes are strong secondary contributions. Dribble success
+    rate speaks to their ability to create in tight spaces. Defensive contributions
+    like tackles and interceptions are worth noting only if genuinely notable —
+    do not weight them equally with attacking output."""
+
+    else:  # midfielder_attacker mix
+        focus = """
+    This comparison spans midfielders and attackers. Assess each player through
+    the lens of their position: for midfielders, weight creativity, passing, and
+    all-round contribution; for attackers, weight goals, shots, and direct attacking
+    output. Make the positional difference explicit in the verdict — a midfielder
+    and an attacker are doing different jobs, and the comparison should reflect that."""
+
     prompt = f"""
     You are MatchMind, a football analyst covering the 2026 FIFA World Cup.
     A fan wants to compare the following players based purely on their performances
@@ -439,15 +507,17 @@ def generate_player_debate(player_names, context_str):
     Players: {', '.join(player_names)}
 
     TOURNAMENT DATA (2026 FIFA World Cup only)
+{context_str}
 
-    {context_str}
+    POSITIONAL FOCUS:
+{focus}
 
     Write a sharp, analytical fan debate breakdown. Structure it as follows:
-
     - An opening line that frames what makes this comparison genuinely interesting or contested.
     - A dedicated paragraph for each player, using their name as the section heading.
       Cover what the numbers say about their tournament impact, their role, their efficiency,
-      and what separates them from the others in this comparison.
+      and what separates them from the others in this comparison. Apply the positional
+      focus above — weight the right statistics for each player's role.
     - A verdict paragraph that directly answers: who has been the standout player at this
       tournament among those compared, and why. Be specific. Reference the data explicitly.
       Do not hedge unless the numbers are genuinely inseparable — in that case, say so and
@@ -461,6 +531,8 @@ def generate_player_debate(player_names, context_str):
     - No exclamation marks. Analytical, assured tone throughout.
     - Write between 300-450 words. Each player section is its own paragraph.
     - No clichés. Every sentence must say something specific and grounded in the data.
+    - Do not reference xG or xA — that data is not available for this tournament.
+      Judge goal threat through shots, shots on target, and goals scored instead.
     """
     try:
         response = get_groq_client().chat.completions.create(
@@ -482,15 +554,20 @@ def generate_team_debate(team_names, context_str):
     Teams: {', '.join(team_names)}
 
     TOURNAMENT DATA (2026 FIFA World Cup only)
-
-    {context_str}
+{context_str}
 
     Write a sharp, analytical fan debate breakdown. Structure it as follows:
-
     - An opening line that frames what makes this comparison interesting.
     - A dedicated paragraph for each team using the team name as the section heading.
-      Cover their record, goal threat, defensive solidity, xG, possession, and what
-      the numbers say about their style and quality at this tournament.
+      Cover their record, goal threat, defensive solidity, possession, passing accuracy,
+      and what the numbers say about their style and quality at this tournament.
+      Where xG and xA data is available, use it to assess whether results reflect the
+      quality of chances created and the creativity behind them. Big chances created is
+      a direct measure of how often a team manufactures high-quality opportunities —
+      use it alongside xG to build a picture of attacking intent. Aerial duel win rate,
+      clearances, and tackles speak to defensive organisation. Total attacks and fouls
+      committed can reveal tempo and aggression. Use the statistics that genuinely
+      explain the team's style — do not list every number mechanically.
     - A verdict paragraph that directly answers: which team has looked more convincing
       so far and why. Be specific. Reference the data directly.
 

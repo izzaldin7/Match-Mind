@@ -8,6 +8,7 @@ this as an HTTP route — see the conversation history for why.
 Usage:
     python clear.py reports      # clear all cached post-match reports
     python clear.py briefings    # clear all cached pre-match briefings
+    python clear.py box-scores   # clear cached Highlightly player box scores
     python clear.py all          # clear both
 """
 
@@ -37,9 +38,12 @@ if __name__ == "__main__":
         clear_content("report")
     elif target == "briefings":
         clear_content("briefing")
+    elif target == "box-scores":
+        clear_content("box_score")
     elif target == "all":
         clear_content("report")
         clear_content("briefing")
+        clear_content("box_score")
     else:
-        print("Usage: python clear.py [reports|briefings|all]")
+        print("Usage: python clear.py [reports|briefings|box-scores|all]")
         sys.exit(1)

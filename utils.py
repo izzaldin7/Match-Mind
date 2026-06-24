@@ -1,4 +1,5 @@
 import requests
+from requests.exceptions import ConnectionError as RequestsConnectionError
 from database import Session, Match, GeneratedContent
 from dotenv import load_dotenv
 import os
@@ -55,14 +56,27 @@ _tournament_stats_cache = {
     "matches_processed": set()
 }
 
+_highlightly_backoff = {
+    "disabled_until": 0,
+    "reason": None
+}
+
 def _safe_float(value):
     try:
         return float(value)
     except (TypeError, ValueError):
         return None
 
+
+def _safe_int(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
 HIGHLIGHTLY_MATCHES_TTL_SECONDS = 300
 BRIEFING_CACHE_TTL_SECONDS = 60 * 60 * 2
+DEFAULT_BOX_SCORE_BACKFILL_LIMIT = int(os.getenv("HIGHLIGHTLY_BOX_SCORE_BACKFILL_LIMIT", "30"))
 
 
 # ── Persistent (DB-backed) cache for generated briefings/reports/lineups ──
@@ -125,13 +139,24 @@ def _get_world_cup_matches():
 
 
 def _get_match_detail(highlightly_match_id):
+    # Check in-memory cache first
     if highlightly_match_id in _cache["match_details"]:
         cached = _cache["match_details"][highlightly_match_id]
         if cached is not None:
             return cached
+
+    # Check DB cache
+    persisted = get_cached_content(highlightly_match_id, "match_detail")
+    if persisted is not None:
+        _cache["match_details"][highlightly_match_id] = persisted
+        return persisted
+
+    # Fetch from Highlightly
     result = fetch_highlightly_match(highlightly_match_id)
     if result is not None:
         _cache["match_details"][highlightly_match_id] = result
+        save_cached_content(highlightly_match_id, "match_detail", result)
+
     return result
 
 
@@ -141,6 +166,10 @@ def get_highlightly_team_id(db_team_name):
 
 
 def _hl_get(endpoint, params=None):
+    now = time.time()
+    if _highlightly_backoff["disabled_until"] > now:
+        return None
+
     if not HIGHLIGHTLY_API_KEY:
         print("Missing HIGHLIGHTLY_API_KEY in environment.")
         return None
@@ -154,6 +183,14 @@ def _hl_get(endpoint, params=None):
             print(f"Highlightly request failed [{endpoint}]: {response.status_code}")
             return None
         return response.json()
+    except RequestsConnectionError as e:
+        _highlightly_backoff["disabled_until"] = time.time() + 300
+        _highlightly_backoff["reason"] = str(e)
+        print(
+            f"Highlightly network/DNS error [{endpoint}]: {e}. "
+            "Pausing Highlightly fetches for 5 minutes."
+        )
+        return None
     except Exception as e:
         print(f"Highlightly request error [{endpoint}]: {e}")
         return None
@@ -167,6 +204,24 @@ def _as_list(payload):
         if isinstance(data, list):
             return data
     return []
+
+
+def _player_stats(player):
+    stats = player.get("statistics")
+    if isinstance(stats, dict):
+        return stats
+    if isinstance(stats, list) and stats:
+        first = stats[0]
+        return first if isinstance(first, dict) else {}
+    return {}
+
+
+def _stat_value(stats, *keys, default=0):
+    for key in keys:
+        value = stats.get(key)
+        if value not in (None, ""):
+            return value
+    return default
 
 
 def _first_present(*values):
@@ -1144,6 +1199,41 @@ def fetch_box_score(highlightly_match_id):
         _cache["box_scores"][highlightly_match_id] = result
     return result
 
+
+def get_or_fetch_match_box_score(match, highlightly_match_id=None, fetch_missing=True):
+    """
+    Returns a finished match's box score from the DB-backed cache first.
+    If missing, optionally fetches it from Highlightly and persists it.
+
+    match.match_id is the football-data.org id used by our local DB.
+    highlightly_match_id is the id required by Highlightly's /box-score endpoint.
+    """
+    cached = get_cached_content(match.match_id, "box_score")
+    if cached:
+        if highlightly_match_id:
+            _cache["box_scores"][highlightly_match_id] = cached
+        return cached
+
+    if not fetch_missing:
+        return None
+
+    if not highlightly_match_id:
+        highlightly_match_id = find_highlightly_match_id(
+            match.home_team,
+            match.away_team,
+            match.match_date
+        )
+
+    if not highlightly_match_id:
+        return None
+
+    box_score_data = fetch_box_score(highlightly_match_id)
+    if not box_score_data:
+        return None
+
+    save_cached_content(match.match_id, "box_score", box_score_data)
+    return box_score_data
+
 def format_box_score_for_prompt(box_score_data, home_team, away_team):
     if not box_score_data:
         return None
@@ -1169,47 +1259,46 @@ def format_box_score_for_prompt(box_score_data, home_team, away_team):
             is_captain = p.get("isCaptain", False)
             offsides = p.get("offsides", 0)
 
-            stats_list = _as_list(p.get("statistics"))
-            stats = stats_list[0] if stats_list else {}
+            stats = _player_stats(p)
 
-            goals = stats.get("goalsScored", 0)
-            assists = stats.get("assists", 0)
-            goals_saved = stats.get("goalsSaved", 0)
-            goals_conceded = stats.get("goalsConceded", 0)
+            goals = _safe_int(_stat_value(stats, "goalsScored", "goals"))
+            assists = _safe_int(_stat_value(stats, "assists"))
+            goals_saved = _safe_int(_stat_value(stats, "goalsSaved", "saves"))
+            goals_conceded = _safe_int(_stat_value(stats, "goalsConceded"))
 
-            xg = stats.get("expectedGoals", 0)
-            xa = stats.get("expectedAssists", 0)
-            xgot = stats.get("expectedGoalsOnTarget", 0)
-            xgot_conceded = stats.get("expectedGoalsOnTargetConceded", 0)
-            xgp = stats.get("expectedGoalsPrevented", 0)
+            xg = _safe_float(_stat_value(stats, "expectedGoals", "xG")) or 0
+            xa = _safe_float(_stat_value(stats, "expectedAssists", "xA")) or 0
+            xgot = _safe_float(_stat_value(stats, "expectedGoalsOnTarget", "xGOT")) or 0
+            xgot_conceded = _safe_float(_stat_value(stats, "expectedGoalsOnTargetConceded", "xGOTConceded")) or 0
+            xgp = _safe_float(_stat_value(stats, "expectedGoalsPrevented", "xGP")) or 0
 
-            shots = stats.get("shotsTotal", 0)
-            shots_ot = stats.get("shotsOnTarget", 0)
-            shots_acc = stats.get("shotsAccuracy", "")
+            shots = _safe_int(_stat_value(stats, "shotsTotal", "totalShots"))
+            shots_ot = _safe_int(_stat_value(stats, "shotsOnTarget"))
+            shots_acc = _stat_value(stats, "shotsAccuracy", default="")
 
-            dribbles_total = stats.get("dribblesTotal", 0)
-            dribbles_succ = stats.get("dribblesSuccessful", 0)
+            dribbles_total = _safe_int(_stat_value(stats, "dribblesTotal", "totalDribbles"))
+            dribbles_succ = _safe_int(_stat_value(stats, "dribblesSuccessful", "successfulDribbles"))
 
-            key_passes = stats.get("passesKey", 0)
-            pass_acc = stats.get("passesAccuracy", "")
-            passes_total = stats.get("passesTotal", 0)
+            key_passes = _safe_int(_stat_value(stats, "passesKey", "keyPasses"))
+            pass_acc = _stat_value(stats, "passesAccuracy", default="")
+            passes_total = _safe_int(_stat_value(stats, "passesTotal", "totalPasses"))
 
-            tackles = stats.get("tacklesTotal", 0)
-            intercepts = stats.get("interceptionsTotal", 0)
+            tackles = _safe_int(_stat_value(stats, "tacklesTotal", "totalTackles"))
+            intercepts = _safe_int(_stat_value(stats, "interceptionsTotal", "totalInterceptions"))
 
-            duels_total = stats.get("duelsTotal", 0)
-            duels_won = stats.get("duelsWon", 0)
-            duel_rate = stats.get("duelSuccessRate", "")
+            duels_total = _safe_int(_stat_value(stats, "duelsTotal", "totalDuels"))
+            duels_won = _safe_int(_stat_value(stats, "duelsWon", "wonDuels"))
+            duel_rate = _stat_value(stats, "duelSuccessRate", default="")
 
-            fouled_by_others = stats.get("fouledByOthers", 0)
-            fouled_others = stats.get("fouledOthers", 0)
+            fouled_by_others = _safe_int(_stat_value(stats, "fouledByOthers", "foulsReceived"))
+            fouled_others = _safe_int(_stat_value(stats, "fouledOthers", "foulsCommitted"))
 
-            pens_scored = stats.get("penaltiesScored", 0)
-            pens_missed = stats.get("penaltiesMissed", 0)
+            pens_scored = _safe_int(_stat_value(stats, "penaltiesScored"))
+            pens_missed = _safe_int(_stat_value(stats, "penaltiesMissed"))
 
-            cards_yellow = stats.get("cardsYellow", 0)
-            cards_red = stats.get("cardsRed", 0)
-            cards_second_yellow = stats.get("cardsSecondYellow", 0)
+            cards_yellow = _safe_int(_stat_value(stats, "cardsYellow", "yellowCards"))
+            cards_red = _safe_int(_stat_value(stats, "cardsRed", "redCards"))
+            cards_second_yellow = _safe_int(_stat_value(stats, "cardsSecondYellow", "secondYellowCards"))
 
             try:
                 rating_val = float(rating) if rating and rating != "N/A" else 0
@@ -1266,7 +1355,10 @@ def format_box_score_for_prompt(box_score_data, home_team, away_team):
 
     return "\n".join(lines) if len(lines) > 1 else None
 
-def build_tournament_cache():
+def build_tournament_cache(max_fetches=None):
+    if max_fetches is None:
+        max_fetches = DEFAULT_BOX_SCORE_BACKFILL_LIMIT
+
     session = Session()
     finished = session.query(Match).filter(
         Match.status.in_(["FINISHED", "Finished"])
@@ -1285,39 +1377,63 @@ def build_tournament_cache():
         return
 
     processed = 0
+    fetches_used = 0
 
     for match in new_matches:
+        if _highlightly_backoff["disabled_until"] > time.time():
+            break
+
         highlightly_id = find_highlightly_match_id(
             match.home_team, match.away_team, match.match_date
         )
 
-        box_score_data = _cache["box_scores"].get(highlightly_id) if highlightly_id else None
-        match_detail = _cache["match_details"].get(highlightly_id) if highlightly_id else None
+        can_fetch = fetches_used < max_fetches
+        had_persisted_box_score = get_cached_content(match.match_id, "box_score") is not None
+        box_score_data = get_or_fetch_match_box_score(
+            match,
+            highlightly_match_id=highlightly_id,
+            fetch_missing=can_fetch
+        )
+        if box_score_data and not had_persisted_box_score:
+            fetches_used += 1
 
-        _tournament_stats_cache["matches_processed"].add(match.match_id)
+        match_detail = None
+        if highlightly_id:
+            match_detail = _cache["match_details"].get(highlightly_id)
+            if not match_detail:
+                persisted = get_cached_content(highlightly_id, "match_detail")
+                if persisted:
+                    _cache["match_details"][highlightly_id] = persisted
+                    match_detail = persisted
+                elif can_fetch and fetches_used < max_fetches:
+                    match_detail = _get_match_detail(highlightly_id)
+                    if match_detail:
+                        fetches_used += 1
 
         if not box_score_data and not match_detail:
             continue
+
+        _tournament_stats_cache["matches_processed"].add(match.match_id)
 
         if box_score_data:
             for team_data in box_score_data:
                 t_name = (team_data.get("team") or {}).get("name", "")
                 for p in _as_list(team_data.get("players", [])):
-                    mins = p.get("minutesPlayed") or 0
+                    mins = _safe_int(p.get("minutesPlayed"))
                     if mins == 0:
                         continue
                     name = p.get("name") or p.get("fullName", "")
                     if not name:
                         continue
 
-                    stats_list = _as_list(p.get("statistics"))
-                    stats = stats_list[0] if stats_list else {}
+                    stats = _player_stats(p)
 
                     if name not in _tournament_stats_cache["players"]:
                         _tournament_stats_cache["players"][name] = {
                             "team": t_name, "matches": 0, "minutes": 0,
+                            "position": p.get("position", ""),
                             "goals": 0, "assists": 0, "ratings": [],
-                            "xg": 0.0, "xa": 0.0, "xgot": 0.0, "xgp": 0.0,
+                            "xg": 0.0, "xa": 0.0,
                             "shots_total": 0, "shots_on_target": 0,
                             "dribbles_successful": 0, "dribbles_total": 0,
                             "key_passes": 0, "passes_total": 0, "passes_successful": 0,
@@ -1331,29 +1447,27 @@ def build_tournament_cache():
                     pc = _tournament_stats_cache["players"][name]
                     pc["matches"] += 1
                     pc["minutes"] += mins
-                    pc["goals"] += stats.get("goalsScored", 0)
-                    pc["assists"] += stats.get("assists", 0)
-                    pc["shots_total"] += stats.get("shotsTotal", 0)
-                    pc["shots_on_target"] += stats.get("shotsOnTarget", 0)
-                    pc["dribbles_successful"] += stats.get("dribblesSuccessful", 0)
-                    pc["dribbles_total"] += stats.get("dribblesTotal", 0)
-                    pc["key_passes"] += stats.get("passesKey", 0)
-                    pc["passes_total"] += stats.get("passesTotal", 0)
-                    pc["passes_successful"] += stats.get("passesSuccessful", 0)
-                    pc["duels_won"] += stats.get("duelsWon", 0)
-                    pc["duels_total"] += stats.get("duelsTotal", 0)
-                    pc["tackles"] += stats.get("tacklesTotal", 0)
-                    pc["interceptions"] += stats.get("interceptionsTotal", 0)
-                    pc["goals_saved"] += stats.get("goalsSaved", 0)
-                    pc["goals_conceded"] += stats.get("goalsConceded", 0)
-                    pc["cards_yellow"] += stats.get("cardsYellow", 0)
-                    pc["cards_red"] += stats.get("cardsRed", 0)
-                    pc["fouls_committed"] += stats.get("fouledOthers", 0)
-                    pc["fouls_suffered"] += stats.get("fouledByOthers", 0)
-                    pc["xg"] += _safe_float(stats.get("expectedGoals", 0)) or 0
-                    pc["xa"] += _safe_float(stats.get("expectedAssists", 0)) or 0
-                    pc["xgot"] += _safe_float(stats.get("expectedGoalsOnTarget", 0)) or 0
-                    pc["xgp"] += _safe_float(stats.get("expectedGoalsPrevented", 0)) or 0
+                    pc["goals"] += _safe_int(_stat_value(stats, "goalsScored", "goals"))
+                    pc["assists"] += _safe_int(_stat_value(stats, "assists"))
+                    pc["shots_total"] += _safe_int(_stat_value(stats, "shotsTotal", "totalShots"))
+                    pc["shots_on_target"] += _safe_int(_stat_value(stats, "shotsOnTarget"))
+                    pc["dribbles_successful"] += _safe_int(_stat_value(stats, "dribblesSuccessful", "successfulDribbles"))
+                    pc["dribbles_total"] += _safe_int(_stat_value(stats, "dribblesTotal", "totalDribbles"))
+                    pc["key_passes"] += _safe_int(_stat_value(stats, "passesKey", "keyPasses"))
+                    pc["passes_total"] += _safe_int(_stat_value(stats, "passesTotal", "totalPasses"))
+                    pc["passes_successful"] += _safe_int(_stat_value(stats, "passesSuccessful", "successfulPasses"))
+                    pc["duels_won"] += _safe_int(_stat_value(stats, "duelsWon", "wonDuels"))
+                    pc["duels_total"] += _safe_int(_stat_value(stats, "duelsTotal", "totalDuels"))
+                    pc["tackles"] += _safe_int(_stat_value(stats, "tacklesTotal", "totalTackles"))
+                    pc["interceptions"] += _safe_int(_stat_value(stats, "interceptionsTotal", "totalInterceptions"))
+                    pc["goals_saved"] += _safe_int(_stat_value(stats, "goalsSaved", "saves"))
+                    pc["goals_conceded"] += _safe_int(_stat_value(stats, "goalsConceded"))
+                    pc["cards_yellow"] += _safe_int(_stat_value(stats, "cardsYellow", "yellowCards"))
+                    pc["cards_red"] += _safe_int(_stat_value(stats, "cardsRed", "redCards"))
+                    pc["fouls_committed"] += _safe_int(_stat_value(stats, "fouledOthers", "foulsCommitted"))
+                    pc["fouls_suffered"] += _safe_int(_stat_value(stats, "fouledByOthers", "foulsReceived"))
+                    pc["xg"] += _safe_float(_stat_value(stats, "expectedGoals", "xG")) or 0
+                    pc["xa"] += _safe_float(_stat_value(stats, "expectedAssists", "xA")) or 0
                     try:
                         r = float(p.get("matchRating") or 0)
                         if r > 0:
@@ -1366,9 +1480,20 @@ def build_tournament_cache():
                 _tournament_stats_cache["teams"][team_name] = {
                     "matches": 0, "won": 0, "drawn": 0, "lost": 0,
                     "goals_for": 0, "goals_against": 0,
-                    "xg_for": 0.0, "possession_total": 0.0, "possession_matches": 0,
-                    "shots_on_target": 0, "corners": 0, "clean_sheets": 0,
+                    "xg_for": 0.0, "xa": 0.0,
+                    "possession_total": 0.0, "possession_matches": 0,
+                    "shots_total": 0, "shots_on_target": 0, "corners": 0,
+                    "key_passes": 0, "passes_total": 0, "passes_successful": 0,
+                    "dribbles_successful": 0, "dribbles_total": 0,
+                    "duels_won": 0, "duels_total": 0,
+                    "tackles": 0, "interceptions": 0,
+                    "clean_sheets": 0, "ratings": [],
                     "cards_yellow": 0, "cards_red": 0,
+                    "big_chances_created": 0,
+                    "aerial_duels_won": 0, "aerial_duels_total": 0,
+                    "clearances": 0,
+                    "fouls": 0,
+                    "attacks": 0,
                 }
 
         hc = _tournament_stats_cache["teams"][match.home_team]
@@ -1384,6 +1509,41 @@ def build_tournament_cache():
         if hg > ag: hc["won"] += 1; ac["lost"] += 1
         elif ag > hg: ac["won"] += 1; hc["lost"] += 1
         else: hc["drawn"] += 1; ac["drawn"] += 1
+
+        if box_score_data:
+            for team_data in box_score_data:
+                t_name = (team_data.get("team") or {}).get("name", "")
+                canonical = None
+                if _names_match(t_name, match.home_team): canonical = match.home_team
+                elif _names_match(t_name, match.away_team): canonical = match.away_team
+                if not canonical:
+                    continue
+                tc = _tournament_stats_cache["teams"][canonical]
+                for p in _as_list(team_data.get("players", [])):
+                    if _safe_int(p.get("minutesPlayed")) <= 0:
+                        continue
+                    stats = _player_stats(p)
+                    tc["xg_for"] += _safe_float(_stat_value(stats, "expectedGoals", "xG")) or 0
+                    tc["xa"] += _safe_float(_stat_value(stats, "expectedAssists", "xA")) or 0
+                    tc["shots_total"] += _safe_int(_stat_value(stats, "shotsTotal", "totalShots"))
+                    tc["shots_on_target"] += _safe_int(_stat_value(stats, "shotsOnTarget"))
+                    tc["key_passes"] += _safe_int(_stat_value(stats, "passesKey", "keyPasses"))
+                    tc["passes_total"] += _safe_int(_stat_value(stats, "passesTotal", "totalPasses"))
+                    tc["passes_successful"] += _safe_int(_stat_value(stats, "passesSuccessful", "successfulPasses"))
+                    tc["dribbles_successful"] += _safe_int(_stat_value(stats, "dribblesSuccessful", "successfulDribbles"))
+                    tc["dribbles_total"] += _safe_int(_stat_value(stats, "dribblesTotal", "totalDribbles"))
+                    tc["duels_won"] += _safe_int(_stat_value(stats, "duelsWon", "wonDuels"))
+                    tc["duels_total"] += _safe_int(_stat_value(stats, "duelsTotal", "totalDuels"))
+                    tc["tackles"] += _safe_int(_stat_value(stats, "tacklesTotal", "totalTackles"))
+                    tc["interceptions"] += _safe_int(_stat_value(stats, "interceptionsTotal", "totalInterceptions"))
+                    tc["cards_yellow"] += _safe_int(_stat_value(stats, "cardsYellow", "yellowCards"))
+                    tc["cards_red"] += _safe_int(_stat_value(stats, "cardsRed", "redCards"))
+                    try:
+                        rating = float(p.get("matchRating") or 0)
+                        if rating > 0:
+                            tc["ratings"].append(rating)
+                    except (TypeError, ValueError):
+                        pass
 
         if match_detail:
             for team_stats in _as_list(match_detail.get("statistics", [])):
@@ -1409,29 +1569,50 @@ def build_tournament_cache():
                     except (ValueError, TypeError):
                         pass
                 xg = _safe_float(values.get("Expected Goals"))
-                if xg: tc["xg_for"] += xg
+                if xg:
+                    tc["xg_for"] += xg
+
+                xa = _safe_float(values.get("Expected Assists"))
+                if xa:
+                    tc["xa"] += xa
+
                 for stat_key, cache_key in [
                     ("Shots on target", "shots_on_target"),
                     ("Corners", "corners")
+                ]:
+                    val = values.get(stat_key)
+                    if val and (cache_key != "shots_on_target" or not box_score_data):
+                        try: tc[cache_key] += int(val)
+                        except (ValueError, TypeError): pass
+
+# Additional stats from match_detail
+                for stat_key, cache_key in [
+                    ("Big Chances Created", "big_chances_created"),
+                    ("Successful Aerial Duels", "aerial_duels_won"),
+                    ("Aerial Duels", "aerial_duels_total"),
+                    ("Clearances", "clearances"),
+                    ("Fouls", "fouls"),
+                    ("Attacks", "attacks"),
                 ]:
                     val = values.get(stat_key)
                     if val:
                         try: tc[cache_key] += int(val)
                         except (ValueError, TypeError): pass
 
-            for card in _extract_card_events(match_detail, (match.home_team, match.away_team)):
-                tc = _tournament_stats_cache["teams"].get(card["team"])
-                if not tc: continue
-                if card["kind"] == "Yellow Card": tc["cards_yellow"] += 1
-                elif card["kind"] == "Red Card": tc["cards_red"] += 1
+            if not box_score_data:
+                for card in _extract_card_events(match_detail, (match.home_team, match.away_team)):
+                    tc = _tournament_stats_cache["teams"].get(card["team"])
+                    if not tc: continue
+                    if card["kind"] == "Yellow Card": tc["cards_yellow"] += 1
+                    elif card["kind"] == "Red Card": tc["cards_red"] += 1
 
         processed += 1
 
     if processed:
         print(f"Tournament cache updated — "
               f"{len(_tournament_stats_cache['players'])} players, "
-              f"{len(_tournament_stats_cache['teams'])} teams tracked.")
-
+              f"{len(_tournament_stats_cache['teams'])} teams tracked "
+              f"({fetches_used} box-score fetches).")
 
 def get_player_tournament_stats(player_name):
     build_tournament_cache()
@@ -1450,9 +1631,12 @@ def _match_player_name(name, candidates):
     for candidate in candidates:
         if candidate.lower() == lowered:
             return candidate
-    for candidate in candidates:
-        if lowered in candidate.lower() or candidate.lower() in lowered:
-            return candidate
+    partial_matches = [
+        candidate for candidate in candidates
+        if lowered in candidate.lower() or candidate.lower() in lowered
+    ]
+    if len(partial_matches) == 1:
+        return partial_matches[0]
     return None
 
 
@@ -1463,46 +1647,76 @@ def get_team_tournament_stats(team_name):
     canonical = TEAM_NAME_ALIASES.get(team_name, team_name)
     return _tournament_stats_cache["teams"].get(canonical)
 
+def _get_position_group(position):
+    if not position:
+        return "unknown"
+    pos = position.lower()
+    if "goalkeeper" in pos:
+        return "goalkeeper"
+    if "defender" in pos or "back" in pos:
+        return "defender"
+    if "midfielder" in pos:
+        return "midfielder"
+    if "forward" in pos or "winger" in pos or "attack" in pos or "striker" in pos:
+        return "attacker"
+    return "unknown"
 
-def format_player_debate_context(player_names):
+
+def build_player_debate_context(player_names):
     build_tournament_cache()
     blocks = []
-    not_found = []
+    missing = []
+    matched_players = []
+    position_groups = []
 
     for name in player_names:
         stats, matched = get_player_tournament_stats(name)
         if not stats:
-            not_found.append(name)
+            missing.append(name)
             continue
 
+        matched_players.append(matched)
+        position_groups.append(_get_position_group(stats.get("position", "")))
         avg_rating = sum(stats["ratings"]) / len(stats["ratings"]) if stats["ratings"] else None
         pass_acc = f"{round(stats['passes_successful'] / stats['passes_total'] * 100)}%" if stats["passes_total"] else None
+        dribble_acc = f"{round(stats['dribbles_successful'] / stats['dribbles_total'] * 100)}%" if stats["dribbles_total"] else None
+        duel_acc = f"{round(stats['duels_won'] / stats['duels_total'] * 100)}%" if stats["duels_total"] else None
 
-        lines = [f"Player: {matched} ({stats['team']})"]
+        lines = [f"Player: {matched} ({stats['team']}) - {stats.get('position', 'Unknown')}"]
         lines.append(f"  Matches: {stats['matches']} ({stats['minutes']} mins)")
         lines.append(f"  Goals: {stats['goals']} | Assists: {stats['assists']}")
-        lines.append(f"  xG: {stats['xg']:.2f} | xA: {stats['xa']:.2f}")
         if avg_rating:
             lines.append(f"  Avg match rating: {avg_rating:.2f} across {len(stats['ratings'])} match(es)")
         lines.append(f"  Shots: {stats['shots_on_target']}/{stats['shots_total']} on target")
         if stats["dribbles_total"]:
-            lines.append(f"  Dribbles: {stats['dribbles_successful']}/{stats['dribbles_total']} successful")
+            lines.append(f"  Dribbles: {stats['dribbles_successful']}/{stats['dribbles_total']} successful ({dribble_acc})")
         lines.append(f"  Key passes: {stats['key_passes']}")
         if pass_acc:
             lines.append(f"  Pass accuracy: {pass_acc} ({stats['passes_total']} attempted)")
         if stats["duels_total"]:
-            lines.append(f"  Duels: {stats['duels_won']}/{stats['duels_total']} won")
+            lines.append(f"  Duels: {stats['duels_won']}/{stats['duels_total']} won ({duel_acc})")
         lines.append(f"  Tackles: {stats['tackles']} | Interceptions: {stats['interceptions']}")
         if stats["goals_saved"]:
-            lines.append(f"  Goals saved: {stats['goals_saved']} | xGP: {stats['xgp']:.2f}")
+            lines.append(f"  Goals saved: {stats['goals_saved']}")
+        if stats["fouls_suffered"]:
+            lines.append(f"  Fouls won: {stats['fouls_suffered']}")
         if stats["cards_yellow"] or stats["cards_red"]:
             lines.append(f"  Cards: {stats['cards_yellow']} yellow, {stats['cards_red']} red")
+
         blocks.append("\n".join(lines))
 
-    result = "\n\n".join(blocks)
-    if not_found:
-        result += f"\n\nNote: No tournament data found for: {', '.join(not_found)}. They may not have appeared in any match yet, or the name doesn't match exactly."
-    return result if blocks else None
+    return {
+        "context": "\n\n".join(blocks) if blocks else None,
+        "missing": missing,
+        "matched_players": matched_players,
+        "position_groups": position_groups,
+    }
+
+def format_player_debate_context(player_names):
+    debate_context = build_player_debate_context(player_names)
+    if debate_context["missing"]:
+        return None
+    return debate_context["context"]
 
 
 def format_team_debate_context(team_names):
@@ -1517,20 +1731,62 @@ def format_team_debate_context(team_names):
             continue
         gd = stats["goals_for"] - stats["goals_against"]
         avg_poss = f"{round(stats['possession_total'] / stats['possession_matches'] * 100)}%" if stats["possession_matches"] else None
+        avg_rating = sum(stats.get("ratings", [])) / len(stats.get("ratings", [])) if stats.get("ratings") else None
+        pass_acc = f"{round(stats.get('passes_successful', 0) / stats.get('passes_total', 0) * 100)}%" if stats.get("passes_total") else None
+        shot_accuracy = f"{round(stats.get('shots_on_target', 0) / stats.get('shots_total', 0) * 100)}%" if stats.get("shots_total") else None
+        duel_rate = f"{round(stats.get('duels_won', 0) / stats.get('duels_total', 0) * 100)}%" if stats.get("duels_total") else None
+        per_match = stats["matches"] or 1
 
         lines = [f"Team: {name}"]
         lines.append(f"  Record: {stats['matches']}MP — {stats['won']}W {stats['drawn']}D {stats['lost']}L")
         lines.append(f"  Goals: {stats['goals_for']} scored, {stats['goals_against']} conceded (GD: {gd:+d})")
         lines.append(f"  Clean sheets: {stats['clean_sheets']}")
-        lines.append(f"  xG for: {stats['xg_for']:.2f}")
+        lines.append(
+            f"  Goal threat: {stats.get('xg_for', 0):.2f} xG "
+            f"({stats.get('xg_for', 0) / per_match:.2f} per match), "
+            f"{stats.get('xa', 0):.2f} xA"
+        )
+        lines.append(
+            f"  Shooting: {stats.get('shots_on_target', 0)}/{stats.get('shots_total', 0)} shots on target"
+            + (f" ({shot_accuracy})" if shot_accuracy else "")
+        )
+        lines.append(f"  Chance creation: {stats.get('key_passes', 0)} key passes")
+        if pass_acc:
+            lines.append(f"  Passing: {pass_acc} completion ({stats.get('passes_total', 0)} attempted)")
+        if stats.get("dribbles_total"):
+            lines.append(
+                f"  Dribbling: {stats.get('dribbles_successful', 0)}/{stats.get('dribbles_total', 0)} successful"
+            )
+        if duel_rate:
+            lines.append(
+                f"  Duels: {stats.get('duels_won', 0)}/{stats.get('duels_total', 0)} won ({duel_rate})"
+            )
+        lines.append(
+            f"  Defensive actions: {stats.get('tackles', 0)} tackles, "
+            f"{stats.get('interceptions', 0)} interceptions"
+        )
+
+        if stats.get("aerial_duels_total"):
+            aerial_rate = f"{round(stats.get('aerial_duels_won', 0) / stats.get('aerial_duels_total', 0) * 100)}%"
+            lines.append(
+                f"  Aerial duels: {stats.get('aerial_duels_won', 0)}/{stats.get('aerial_duels_total', 0)} won ({aerial_rate})"
+            )
+        if stats.get("clearances"):
+            lines.append(f"  Clearances: {stats['clearances']}")
+        if stats.get("big_chances_created"):
+            lines.append(f"  Big chances created: {stats['big_chances_created']}")
+        if stats.get("fouls"):
+            lines.append(f"  Fouls committed: {stats['fouls']}")
+        if stats.get("attacks"):
+            lines.append(f"  Total attacks: {stats['attacks']}")
+        if avg_rating:
+            lines.append(f"  Average player match rating: {avg_rating:.2f}")
         if avg_poss:
             lines.append(f"  Avg possession: {avg_poss}")
-        if stats["shots_on_target"]:
-            lines.append(f"  Shots on target: {stats['shots_on_target']}")
-        if stats["corners"]:
+        if stats.get("corners"):
             lines.append(f"  Corners won: {stats['corners']}")
-        if stats["cards_yellow"] or stats["cards_red"]:
-            lines.append(f"  Cards: {stats['cards_yellow']} yellow, {stats['cards_red']} red")
+        if stats.get("cards_yellow") or stats.get("cards_red"):
+            lines.append(f"  Cards: {stats.get('cards_yellow', 0)} yellow, {stats.get('cards_red', 0)} red")
         blocks.append("\n".join(lines))
 
     result = "\n\n".join(blocks)
@@ -1564,10 +1820,9 @@ def _team_standout_performer(box_score_data, team_name):
         return None
 
     name = best.get("name") or best.get("fullName", "Unknown")
-    stats_list = _as_list(best.get("statistics"))
-    stats = stats_list[0] if stats_list else {}
-    goals = stats.get("goalsScored", 0)
-    assists = stats.get("assists", 0)
+    stats = _player_stats(best)
+    goals = _safe_int(_stat_value(stats, "goalsScored", "goals"))
+    assists = _safe_int(_stat_value(stats, "assists"))
 
     parts = [f"rating {best_rating:.1f}"]
     if goals:

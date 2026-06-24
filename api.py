@@ -12,7 +12,7 @@ from ai import (
     generate_team_debate
 )
 from utils import (
-    format_player_debate_context,
+    build_player_debate_context,
     format_team_debate_context,
     build_tournament_cache,
     get_cached_content,
@@ -238,22 +238,58 @@ class DebatePlayersRequest(BaseModel):
 class DebateTeamsRequest(BaseModel):
     teams: List[str]
 
+def _validate_player_positions(position_groups):
+    """
+    Rules:
+    - Goalkeepers can only be compared with goalkeepers
+    - Defenders can only be compared with defenders
+    - Midfielders and attackers can be compared with each other
+    Returns an error string or None if valid.
+    """
+    unique = set(position_groups)
+    if "unknown" in unique:
+        unique.discard("unknown")
+
+    if "goalkeeper" in unique and len(unique) > 1:
+        return "Goalkeepers can only be compared with other goalkeepers."
+    if "defender" in unique and (unique - {"defender"}):
+        return "Defenders can only be compared with other defenders."
+    return None
+
 @app.post("/debate/players")
 def debate_players(request: DebatePlayersRequest):
     if len(request.players) < 2:
         raise HTTPException(status_code=400, detail="Provide at least 2 players to compare.")
     if len(request.players) > 4:
         raise HTTPException(status_code=400, detail="Maximum 4 players can be compared at once.")
-    context_str = format_player_debate_context(request.players)
+    debate_context = build_player_debate_context(request.players)
+    if debate_context["missing"]:
+        missing = ", ".join(debate_context["missing"])
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"No tournament data found for: {missing}. "
+                "Use the player's name as it appears in the cached World Cup match data, "
+                "or wait until their team's finished-match box scores have been cached."
+            )
+        )
+    position_error = _validate_player_positions(debate_context["position_groups"])
+    if position_error:
+        raise HTTPException(status_code=400, detail=position_error)
+    context_str = debate_context["context"]
     if not context_str:
         raise HTTPException(status_code=404, detail="No tournament data found for the requested players. They may not have appeared in any match yet.")
+    matched_players = debate_context["matched_players"]
     try:
-        debate = generate_player_debate(request.players, context_str)
+        debate = generate_player_debate(
+            matched_players, 
+            context_str,
+            debate_context["position_groups"])
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     return {
         "type": "players",
-        "subjects": request.players,
+        "subjects": matched_players,
         "context": context_str,
         "debate": debate
     }

@@ -32,7 +32,7 @@ class GeneratedContent(Base):
     __tablename__ = "generated_content"
     id = Column(Integer, primary_key=True)
     match_id = Column(Integer, index=True)
-    content_type = Column(String)   # "report" or "briefing"
+    content_type = Column(String)   # "report", "briefing", "lineup", "box_score", "match_detail"
     payload = Column(Text)          # JSON-encoded response dict
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 

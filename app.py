@@ -1,5 +1,6 @@
 import streamlit as st
 import requests
+import html
 from datetime import datetime
 
 API_BASE = "http://127.0.0.1:8000"
@@ -68,6 +69,14 @@ st.markdown("""
         background: transparent !important;
     }
     .stTabs [data-baseweb="tab-panel"] { padding-top: 2rem; }
+            
+    .stTabs [data-baseweb="tab-panel"] .stTextInput,
+    .stTabs [data-baseweb="tab-panel"] .stSelectbox {
+        margin-bottom: 0 !important;
+    }
+    .stTabs [data-baseweb="tab-panel"] div[data-testid="stVerticalBlock"] > div {
+        gap: 0 !important;
+    }
 
     .match-card {
         background: #0f1525;
@@ -253,6 +262,48 @@ st.markdown("""
     .s-team-gold { flex: 3; color: #FFD700; font-weight: 600; }
     .s-num { flex: 1; text-align: center; color: #c8cad4; }
     .s-pts { flex: 1; text-align: center; color: #FFD700; font-family: 'JetBrains Mono', monospace; font-weight: 600; }
+            
+    .fd-arena {
+        background: #0f1525;
+        border: 1px solid #1a2035;
+        border-radius: 4px;
+        padding: 1.5rem;
+        margin-bottom: 1.25rem;
+    }      
+    .fd-vs-divider {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 0.3rem;
+        padding-top: 1.1rem;
+    }
+    .fd-vs-line { width: 1px; height: 18px; background: #1a2035; }
+    .fd-vs-text {
+        font-family: 'Bebas Neue', sans-serif;
+        font-size: 1.1rem;
+        letter-spacing: 3px;
+        color: #FFD700;
+        opacity: 0.6;
+    }
+    .fd-streak { display: flex; gap: 4px; margin-top: 1rem; }
+    .fd-dot {
+        width: 5px; height: 5px; border-radius: 50%;
+        background: #1a2035; transition: background 0.3s;
+    }
+    .fd-dot-filled { background: #FFD700; }
+    .fd-slot-num {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.6rem;
+        color: #FFD700;
+        background: #FFD70015;
+        border: 1px solid #FFD70030;
+        border-radius: 2px;
+        padding: 0.1rem 0.4rem;
+        margin-bottom: 0.3rem;
+        display: inline-block;
+    }
+          
 </style>
 """, unsafe_allow_html=True)
 
@@ -325,7 +376,20 @@ def format_ai_text(text):
     lines_html = []
     for i, para in enumerate(paragraphs):
         lines = para.split('\n')
-        joined = '<br>'.join(lines)
+        first_line = lines[0].strip()
+        is_heading = first_line.startswith("#")
+        if is_heading:
+            heading_text = html.escape(first_line.lstrip("#").strip())
+            body_lines = [html.escape(line) for line in lines[1:] if line.strip()]
+            lines_html.append(
+                f'<p style="font-family:\'Bebas Neue\',sans-serif;font-size:1.25rem;'
+                f'letter-spacing:2px;color:#FFD700;margin:1.1rem 0 0.45rem 0;">{heading_text}</p>'
+            )
+            if body_lines:
+                lines_html.append(f'<p style="margin:0 0 1.2rem 0;">{"<br>".join(body_lines)}</p>')
+            continue
+
+        joined = '<br>'.join(html.escape(line) for line in lines)
         if i == 0 and len(para) < 120:
             lines_html.append(
                 f'<p style="font-family:\'Bebas Neue\',sans-serif;font-size:1.3rem;'
@@ -490,7 +554,7 @@ def render_match_card(m, key_prefix=""):
     # Single details button, bottom left
     btn_col1, _ = st.columns([2, 10])
     with btn_col1:
-        btn_label = "✕ Details" if st.session_state.get(details_key) else "⚡ Details"
+        btn_label = "Details" if st.session_state.get(details_key) else "Details"
         if st.button(btn_label, key=f"{key_prefix}_details_{mid}"):
             st.session_state[details_key] = not st.session_state.get(details_key, False)
             st.rerun()
@@ -500,7 +564,7 @@ def render_match_card(m, key_prefix=""):
         if is_live:
             sub1, _ = st.columns([2, 10])
             with sub1:
-                if st.button("🗒 Lineup", key=f"{key_prefix}_lineup_{mid}"):
+                if st.button("Lineup", key=f"{key_prefix}_lineup_{mid}"):
                     st.session_state[active_key] = False
                     with st.spinner("Fetching lineup..."):
                         result = api_get(f"/matches/{mid}/lineup")
@@ -512,7 +576,7 @@ def render_match_card(m, key_prefix=""):
         else:
             sub1, sub2, _ = st.columns([2, 2, 8])
             with sub1:
-                action_label = "⚡ Briefing" if is_upcoming else "📋 Report"
+                action_label = "Briefing" if is_upcoming else "Report"
                 if st.button(action_label, key=f"{key_prefix}_action_{mid}"):
                     if is_upcoming:
                         st.session_state[lineup_active_key] = False
@@ -533,7 +597,7 @@ def render_match_card(m, key_prefix=""):
                         elif result:
                             st.error(result["error"])
             with sub2:
-                if st.button("🗒 Lineup", key=f"{key_prefix}_lineup_{mid}"):
+                if st.button("Lineup", key=f"{key_prefix}_lineup_{mid}"):
                     st.session_state[active_key] = False
                     with st.spinner("Fetching lineup..."):
                         result = api_get(f"/matches/{mid}/lineup")
@@ -729,57 +793,105 @@ with tab3:
 with tab4:
     st.markdown('<div class="section-label">Fan Debate Analyzer — 2026 FIFA World Cup</div>', unsafe_allow_html=True)
 
-    debate_type = st.radio(
-        "Compare", ["Players", "Teams"],
-        horizontal=True,
-        label_visibility="collapsed"
-    )
+    debate_tab_players, debate_tab_teams = st.tabs(["Players", "Teams"])
 
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    if debate_type == "Players":
-        st.markdown('<div class="section-label">Enter player names as they appear in match data (2–4 players)</div>', unsafe_allow_html=True)
-
+    # ══════════════════════════════════════════════════════════════
+    # PLAYERS TAB
+    # ══════════════════════════════════════════════════════════════
+    with debate_tab_players:
         if "debate_player_count" not in st.session_state:
             st.session_state["debate_player_count"] = 2
 
-        player_inputs = []
-        for i in range(st.session_state["debate_player_count"]):
-            val = st.text_input(
-                f"Player {i + 1}",
-                key=f"debate_player_{i}",
-                label_visibility="collapsed",
-                placeholder=f"Player {i + 1} name"
-            )
-            player_inputs.append(val)
+        count = st.session_state["debate_player_count"]
 
-        add_col, remove_col, _ = st.columns([1, 1, 6])
-        with add_col:
-            if st.session_state["debate_player_count"] < 4:
-                if st.button("+ Add player"):
+        st.markdown('</div class="fd-arena">', unsafe_allow_html=True)
+
+        arena_col1, arena_div, arena_col2 = st.columns([5, 0.4, 5])
+        with arena_col1:
+            st.markdown('<div class="section-label">Player 1</div>', unsafe_allow_html=True)
+            p1 = st.text_input("p1", key="debate_player_0", label_visibility="collapsed", placeholder="e.g. Lionel Messi")
+        with arena_div:
+            st.markdown("""
+<div class="fd-vs-divider">
+    <div class="fd-vs-line"></div>
+    <div class="fd-vs-text">VS</div>
+    <div class="fd-vs-line"></div>
+</div>
+""", unsafe_allow_html=True)
+        with arena_col2:
+            st.markdown('<div class="section-label">Player 2</div>', unsafe_allow_html=True)
+            p2 = st.text_input("p2", key="debate_player_1", label_visibility="collapsed", placeholder="e.g. Kylian Mbappé")
+
+        # Extra player slots
+        extra_inputs = []
+        for i in range(2, count):
+            st.markdown(f'<div style="margin-top:0.75rem;"><span class="fd-slot-num">Player {i+1}</span></div>', unsafe_allow_html=True)
+            val = st.text_input(f"extra_p{i}", key=f"debate_player_{i}", label_visibility="collapsed", placeholder=f"Player {i+1} name")
+            extra_inputs.append(val)
+
+        dots_html = "".join(
+            f'<div class="fd-dot {"fd-dot-filled" if i < count else ""}"></div>'
+            for i in range(4)
+        )
+        st.markdown(f"""
+<div style="display:flex;align-items:center;gap:0.75rem;margin-top:0.25rem;margin-bottom:0.1rem;">
+    <div class="fd-streak">{dots_html}</div>
+    <span class="fd-slot-num">{count} / 4</span>
+</div>
+""", unsafe_allow_html=True)
+
+        add_col1, add_col2, _ = st.columns([1.2, 1, 6])
+        with add_col1:
+            if count < 4:
+                if st.button("+ Add player", key="debate_add"):
                     st.session_state["debate_player_count"] += 1
                     st.rerun()
-        with remove_col:
-            if st.session_state["debate_player_count"] > 2:
-                if st.button("– Remove"):
+        with add_col2:
+            if count > 2:
+                if st.button("– Remove", key="debate_remove"):
                     st.session_state["debate_player_count"] -= 1
                     st.rerun()
 
-        st.markdown("<br>", unsafe_allow_html=True)
-        players = [p.strip() for p in player_inputs if p.strip()]
+        st.markdown('<div style="display:flex;justify-content:center;margin:0.15rem 0 0 0;">', unsafe_allow_html=True)
+        gen_clicked_p = st.button("Generate Debate", key="debate_players_btn")
+        st.markdown('</div>', unsafe_allow_html=True)
+        if gen_clicked_p:
+                players = [p for p in [p1, p2] + extra_inputs if p.strip()]
+                if len(players) < 2:
+                    st.error("Enter at least 2 player names.")
+                else:
+                    st.session_state.pop("debate_result", None)
+                    with st.spinner("Analyzing tournament data..."):
+                        result = api_post("/debate/players", {"players": players})
+                    if result and "error" not in result:
+                        st.session_state["debate_result"] = result
+                    elif result:
+                        st.error(result["error"])
 
-        if st.button("⚡ Generate Debate", key="debate_players_btn"):
-            if len(players) < 2:
-                st.error("Enter at least 2 player names.")
-            else:
-                with st.spinner("Analyzing tournament data..."):
-                    result = api_post("/debate/players", {"players": players})
-                if result and "error" not in result:
-                    st.session_state["debate_result"] = result
-                elif result:
-                    st.error(result["error"])
+        # Result
+        if "debate_result" in st.session_state and st.session_state["debate_result"].get("type") == "players":
+            r = st.session_state["debate_result"]
+            label = " vs ".join(r.get("subjects", []))
+            close_col, _ = st.columns([1, 9])
+            with close_col:
+                if st.button("✕ Clear", key="debate_close_p"):
+                    del st.session_state["debate_result"]
+                    st.rerun()
+            st.markdown(f"""
+<div class="ai-modal">
+    <div class="ai-modal-fixture">
+        <div class="ai-modal-teams">{label}</div>
+        <div class="ai-modal-sub">2026 FIFA World Cup · Player Comparison</div>
+    </div>
+    <div class="ai-modal-header">Fan Debate Analysis</div>
+{format_ai_text(r['debate'])}
+</div>
+""", unsafe_allow_html=True)
 
-    else:  # Teams
+    # ══════════════════════════════════════════════════════════════
+    # TEAMS TAB
+    # ══════════════════════════════════════════════════════════════
+    with debate_tab_teams:
         all_matches = api_get("/matches")
         team_list = []
         if all_matches and "error" not in all_matches:
@@ -789,44 +901,51 @@ with tab4:
                 teams_seen.add(m["away_team"])
             team_list = sorted(t for t in teams_seen if t)
 
-        st.markdown('<div class="section-label">Select two teams to compare</div>', unsafe_allow_html=True)
-        t_col1, t_col2 = st.columns(2)
+        st.markdown('</div class="fd-arena">', unsafe_allow_html=True)
+
+        t_col1, t_div, t_col2 = st.columns([5, 0.4, 5])
         with t_col1:
-            team_a = st.selectbox("Team A", team_list, key="debate_team_a", label_visibility="collapsed")
+            st.markdown('<div class="section-label">Team A</div>', unsafe_allow_html=True)
+            team_a = st.selectbox("team_a", team_list, key="debate_team_a", label_visibility="collapsed")
+        with t_div:
+            st.markdown("""
+<div class="fd-vs-divider">
+    <div class="fd-vs-line"></div>
+    <div class="fd-vs-text">VS</div>
+    <div class="fd-vs-line"></div>
+</div>
+""", unsafe_allow_html=True)
         with t_col2:
+            st.markdown('<div class="section-label">Team B</div>', unsafe_allow_html=True)
             remaining = [t for t in team_list if t != team_a]
-            team_b = st.selectbox("Team B", remaining, key="debate_team_b", label_visibility="collapsed")
+            team_b = st.selectbox("team_b", remaining, key="debate_team_b", label_visibility="collapsed")
 
-        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown('<div style="display:flex;justify-content:center;margin:0.15rem 0 0 0;">', unsafe_allow_html=True)
+        gen_clicked_t = st.button("Generate Debate", key="debate_teams_btn")
+        st.markdown('</div>', unsafe_allow_html=True)
+        if gen_clicked_t:
+                st.session_state.pop("debate_result", None)
+                with st.spinner("Analyzing tournament data..."):
+                    result = api_post("/debate/teams", {"teams": [team_a, team_b]})
+                if result and "error" not in result:
+                    st.session_state["debate_result"] = result
+                elif result:
+                    st.error(result["error"])
 
-        if st.button("⚡ Generate Debate", key="debate_teams_btn"):
-            with st.spinner("Analyzing tournament data..."):
-                result = api_post("/debate/teams", {"teams": [team_a, team_b]})
-            if result and "error" not in result:
-                st.session_state["debate_result"] = result
-            elif result:
-                st.error(result["error"])
-
-    # ── Result display ─────────────────────────────────────────────
-    if "debate_result" in st.session_state:
-        r = st.session_state["debate_result"]
-        subjects = r.get("subjects", [])
-        is_players = r.get("type") == "players"
-
-        label = " vs ".join(subjects)
-        sub_label = "Player Comparison" if is_players else "Team Comparison"
-
-        close_col, _ = st.columns([1, 9])
-        with close_col:
-            if st.button("✕ Clear", key="debate_close"):
-                del st.session_state["debate_result"]
-                st.rerun()
-
-        st.markdown(f"""
+        # Result
+        if "debate_result" in st.session_state and st.session_state["debate_result"].get("type") == "teams":
+            r = st.session_state["debate_result"]
+            label = " vs ".join(r.get("subjects", []))
+            close_col, _ = st.columns([1, 9])
+            with close_col:
+                if st.button("✕ Clear", key="debate_close_t"):
+                    del st.session_state["debate_result"]
+                    st.rerun()
+            st.markdown(f"""
 <div class="ai-modal">
     <div class="ai-modal-fixture">
         <div class="ai-modal-teams">{label}</div>
-        <div class="ai-modal-sub">2026 FIFA World Cup · {sub_label}</div>
+        <div class="ai-modal-sub">2026 FIFA World Cup · Team Comparison</div>
     </div>
     <div class="ai-modal-header">Fan Debate Analysis</div>
     {format_ai_text(r['debate'])}
