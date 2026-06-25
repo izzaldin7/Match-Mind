@@ -776,9 +776,14 @@ with tab2:
 
             with right_col:
                 st.markdown('<div class="section-label">Standings</div>', unsafe_allow_html=True)
-                from utils import get_group_standings
-                standings = get_group_standings(group_name)
-                render_standings(standings)
+                if group_name == "Knockout Stage":
+                    st.markdown('<div style="color:#5a6070;font-size:0.8rem;padding:0.5rem 0;">No standings for knockout matches.</div>', unsafe_allow_html=True)
+                else:
+                    standings = api_get(f"/standings/{group_name}")
+                    if is_error_response(standings):
+                        st.error(standings["error"])
+                    else:
+                        render_standings(standings)
 
             st.markdown("<hr style='border:none;border-top:1px solid #1a2035;margin:1.5rem 0;'>", unsafe_allow_html=True)
 

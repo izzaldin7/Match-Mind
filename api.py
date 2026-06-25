@@ -16,6 +16,7 @@ from utils import (
     format_team_debate_context,
     build_tournament_cache,
     get_cached_content,
+    get_group_standings,
     save_cached_content,
     BRIEFING_CACHE_TTL_SECONDS,
     find_highlightly_match_id,
@@ -84,6 +85,16 @@ def get_today_matches(session=Depends(get_db)):
         }
         for m in matches
     ]
+
+@app.get("/standings/{group_name}")
+def get_standings(group_name: str):
+    normalized_group = group_name.strip().upper().replace(" ", "_")
+    if len(normalized_group) == 1:
+        normalized_group = f"GROUP_{normalized_group}"
+    elif normalized_group.startswith("GROUP_") is False and normalized_group.startswith("GROUP"):
+        normalized_group = normalized_group.replace("GROUP", "GROUP_", 1)
+
+    return get_group_standings(normalized_group) or []
 
 @app.get("/matches/{match_id}/briefing")
 def get_match_briefing(match_id: int, session=Depends(get_db)):
