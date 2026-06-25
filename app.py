@@ -3,7 +3,7 @@ import requests
 import html
 from datetime import datetime
 
-API_BASE = "http://127.0.0.1:8000"
+API_BASE = "https://web-production-26b18.up.railway.app"
 
 st.set_page_config(
     page_title="MatchMind",
