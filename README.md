@@ -110,8 +110,7 @@ This fetches all current World Cup match data from football-data.org and builds 
 ```bash
 uvicorn api:app --reload
 ```
-
-The API will be available at `http://localhost:8000`.
+The API is live at https://web-production-26b18.up.railway.app
 
 ---
 
