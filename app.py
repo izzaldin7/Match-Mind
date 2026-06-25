@@ -353,7 +353,7 @@ def api_post(endpoint, payload):
 
 
 def status_class(status):
-    s = status.upper()
+    s = (status or "").upper()
     if s in ("IN_PLAY", "PAUSED", "HALFTIME"):
         return "match-card-live", "status-live", "● LIVE"
     elif s in ("FINISHED",):
@@ -363,7 +363,7 @@ def status_class(status):
 
 
 def format_score(home_score, away_score, status):
-    s = status.upper()
+    s = (status or "").upper()
     if s in ("IN_PLAY", "PAUSED", "HALFTIME", "FINISHED"):
         h = home_score if home_score is not None else "?"
         a = away_score if away_score is not None else "?"
@@ -526,8 +526,9 @@ def render_lineup_card(lineup_data, home_team, away_team):
 
 
 def render_match_card(m, key_prefix=""):
-    card_class, status_cls, status_label = status_class(m["status"])
-    score = format_score(m.get("home_score"), m.get("away_score"), m["status"])
+    status_val = m.get("status") or ""
+    card_class, status_cls, status_label = status_class(status_val)
+    score = format_score(m.get("home_score"), m.get("away_score"), status_val)
     grp = group_display(m.get("group", ""))
     group_badge_html = f'<span class="group-badge">{grp}</span>' if grp else ""
     date_val = m.get("date") or ""
@@ -535,8 +536,8 @@ def render_match_card(m, key_prefix=""):
     kickoff_val = m.get("kick_off_time") or ""
     kickoff_html = f'<span style="color:#5a6070;font-family:Inter,sans-serif;font-size:0.65rem;">⏱ {kickoff_val}</span>' if kickoff_val else ""
     meta_row = f'{group_badge_html}<span class="{status_cls}" style="font-family:\'Inter\',sans-serif;font-size:0.65rem;letter-spacing:1px;text-transform:uppercase;">{status_label}</span>{date_html}{kickoff_html}'
-    is_finished = m["status"].upper() in ("FINISHED",)
-    is_upcoming = m["status"].upper() not in ("FINISHED", "IN_PLAY", "PAUSED", "HALFTIME")
+    is_finished = status_val.upper() in ("FINISHED",)
+    is_upcoming = status_val.upper() not in ("FINISHED", "IN_PLAY", "PAUSED", "HALFTIME")
     mid = m['match_id']
     modal_key = f"ai_result_{mid}"
     lineup_key = f"lineup_result_{mid}"
@@ -727,9 +728,9 @@ with tab2:
 
         def filter_matches(matches):
             if status_filter == "Upcoming":
-                return [m for m in matches if m["status"].upper() not in ("FINISHED",)]
+                return [m for m in matches if (m.get("status") or "").upper() not in ("FINISHED",)]
             elif status_filter == "Finished":
-                return [m for m in matches if m["status"].upper() in ("FINISHED",)]
+                return [m for m in matches if (m.get("status") or "").upper() in ("FINISHED",)]
             return matches
 
         def render_group_section(group_name, matches):
@@ -777,7 +778,7 @@ with tab3:
     all_matches = api_get("/matches")
 
     if all_matches and "error" not in all_matches:
-        finished_matches = [m for m in all_matches if m["status"].upper() in ("FINISHED",)]
+        finished_matches = [m for m in all_matches if (m.get("status") or "").upper() in ("FINISHED",)]
 
         if not finished_matches:
             st.markdown('<div style="color:#5a6070;font-size:0.85rem;padding:1rem 0;">No finished matches yet.</div>', unsafe_allow_html=True)
