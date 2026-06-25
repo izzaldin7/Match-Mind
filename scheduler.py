@@ -12,6 +12,26 @@ url = "https://api.football-data.org/v4/competitions/WC/matches"
 headers = {"X-Auth-Token": API_KEY}
 
 
+def score_value(match, side):
+    score = match.get("score") or {}
+    for key in ("fullTime", "regularTime", "current", "halfTime"):
+        score_block = score.get(key)
+        if isinstance(score_block, dict) and score_block.get(side) is not None:
+            return score_block.get(side)
+    return None
+
+
+def should_keep_existing_live_state(existing, incoming_status, incoming_home_score, incoming_away_score):
+    existing_status = (existing.status or "").upper()
+    incoming_status = (incoming_status or "").upper()
+    incoming_has_no_score = incoming_home_score is None and incoming_away_score is None
+    return (
+        existing_status in ("LIVE", "IN_PLAY", "PAUSED", "HALFTIME")
+        and incoming_status in ("TIMED", "SCHEDULED")
+        and incoming_has_no_score
+    )
+
+
 def refresh_match_data():
     print("Refreshing match data from football-data.org....")
 
@@ -30,11 +50,17 @@ def refresh_match_data():
     try:
         for match in data['matches']:
             existing = session.query(Match).filter_by(match_id=match['id']).first()
+            incoming_status = match['status']
+            incoming_home_score = score_value(match, "home")
+            incoming_away_score = score_value(match, "away")
             if existing:
-                print(f"Updating {match['homeTeam']['name']} vs {match['awayTeam']['name']}: {match['status']}")
-                existing.status = match['status']
-                existing.home_score = match['score']['fullTime']['home']
-                existing.away_score = match['score']['fullTime']['away']
+                print(f"Updating {match['homeTeam']['name']} vs {match['awayTeam']['name']}: {incoming_status}")
+                if should_keep_existing_live_state(existing, incoming_status, incoming_home_score, incoming_away_score):
+                    print("Keeping existing live state; upstream returned scheduled/null data for an active match.")
+                else:
+                    existing.status = incoming_status
+                    existing.home_score = incoming_home_score
+                    existing.away_score = incoming_away_score
                 existing.kick_off_time = match['utcDate'][11:16] + " UTC"
             else:
                 new_match = Match(
@@ -42,9 +68,9 @@ def refresh_match_data():
                     home_team=match['homeTeam']['name'],
                     away_team=match['awayTeam']['name'],
                     match_date=match['utcDate'][:10],
-                    status=match['status'],
-                    home_score=match['score']['fullTime']['home'],
-                    away_score=match['score']['fullTime']['away'],
+                    status=incoming_status,
+                    home_score=incoming_home_score,
+                    away_score=incoming_away_score,
                     stage=match['stage'],
                     group_name=match.get('group'),
                     kick_off_time=match['utcDate'][11:16] + " UTC"

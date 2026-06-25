@@ -1,5 +1,6 @@
 from fastapi import Depends, FastAPI, HTTPException
 from contextlib import asynccontextmanager
+from datetime import datetime, time, timedelta, timezone
 from pydantic import BaseModel
 from typing import List
 from database import Session, Match
@@ -42,6 +43,48 @@ def get_db():
         session.close()
 
 
+def inferred_status(match):
+    status = match.status or ""
+    status_upper = status.upper()
+    if status_upper not in ("TIMED", "SCHEDULED"):
+        return status
+    if not match.match_date or not match.kick_off_time:
+        return status
+
+    try:
+        raw_time = match.kick_off_time.split()[0]
+        kick_time = time.fromisoformat(raw_time)
+        kickoff = datetime.combine(
+            datetime.fromisoformat(match.match_date).date(),
+            kick_time,
+            tzinfo=timezone.utc
+        )
+    except (ValueError, TypeError):
+        return status
+
+    now = datetime.now(timezone.utc)
+    if kickoff <= now < kickoff + timedelta(hours=2, minutes=30):
+        return "LIVE"
+    return status
+
+
+def serialize_match(match, include_date=True):
+    payload = {
+        "match_id": match.match_id,
+        "home_team": match.home_team,
+        "away_team": match.away_team,
+        "status": inferred_status(match),
+        "home_score": match.home_score,
+        "away_score": match.away_score,
+        "group": match.group_name,
+        "kick_off_time": match.kick_off_time
+    }
+    if include_date:
+        payload["date"] = match.match_date
+        payload["stage"] = match.stage
+    return payload
+
+
 # ── Existing endpoints ─────────────────────────────────────────────
 
 @app.get("/")
@@ -51,40 +94,13 @@ def root():
 @app.get("/matches")
 def get_matches(session=Depends(get_db)):
     matches = session.query(Match).all()
-    return [
-        {
-            "match_id": m.match_id,
-            "home_team": m.home_team,
-            "away_team": m.away_team,
-            "date": m.match_date,
-            "status": m.status,
-            "home_score": m.home_score,
-            "away_score": m.away_score,
-            "stage": m.stage,
-            "group": m.group_name,
-            "kick_off_time": m.kick_off_time
-        }
-        for m in matches
-    ]
+    return [serialize_match(m) for m in matches]
 
 @app.get("/matches/today")
 def get_today_matches(session=Depends(get_db)):
-    from datetime import datetime, timezone
     today = str(datetime.now(timezone.utc).date())
     matches = session.query(Match).filter(Match.match_date.in_([today])).all()
-    return [
-        {
-            "match_id": m.match_id,
-            "home_team": m.home_team,
-            "away_team": m.away_team,
-            "status": m.status,
-            "home_score": m.home_score,
-            "away_score": m.away_score,
-            "group": m.group_name,
-            "kick_off_time": m.kick_off_time
-        }
-        for m in matches
-    ]
+    return [serialize_match(m, include_date=False) for m in matches]
 
 @app.get("/standings/{group_name}")
 def get_standings(group_name: str):
