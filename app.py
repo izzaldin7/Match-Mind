@@ -322,12 +322,19 @@ def api_get(endpoint):
     try:
         r = requests.get(f"{API_BASE}{endpoint}", timeout=60)
         r.raise_for_status()
-        return r.json()
+        data = r.json()
+        if isinstance(data, dict) and "detail" in data:
+            return {"error": data["detail"]}
+        return data
     except requests.exceptions.ConnectionError:
         st.error("Cannot connect to MatchMind API. Make sure the server is running.")
         return None
     except requests.exceptions.HTTPError as e:
-        return {"error": e.response.json().get("detail", str(e))}
+        try:
+            detail = e.response.json().get("detail", str(e))
+        except (ValueError, requests.exceptions.JSONDecodeError):
+            detail = f"Server error ({e.response.status_code}): no response body"
+        return {"error": detail}
     except Exception as e:
         st.error(f"Unexpected error: {e}")
         return None
@@ -350,6 +357,22 @@ def api_post(endpoint, payload):
     except Exception as e:
         st.error(f"Unexpected error: {e}")
         return None
+
+
+def is_error_response(data):
+    return isinstance(data, dict) and "error" in data
+
+
+def ensure_match_list(data, label="matches"):
+    if data is None:
+        return None
+    if is_error_response(data):
+        st.error(data["error"])
+        return None
+    if not isinstance(data, list):
+        st.error(f"Unexpected API response while loading {label}.")
+        return None
+    return data
 
 
 def status_class(status):
@@ -691,6 +714,7 @@ with tab1:
     st.markdown(f'<div class="section-label">{today_str}</div>', unsafe_allow_html=True)
 
     data = api_get("/matches/today")
+    data = ensure_match_list(data, "today's matches")
     if data is None:
         st.stop()
 
@@ -707,8 +731,9 @@ with tab1:
 
 with tab2:
     all_data = api_get("/matches")
+    all_data = ensure_match_list(all_data, "fixtures")
 
-    if all_data and "error" not in all_data:
+    if all_data:
         groups = {}
         knockout = []
         for m in all_data:
@@ -776,8 +801,9 @@ with tab3:
     st.markdown('<div class="section-label">Finished Matches — Select to Generate Report</div>', unsafe_allow_html=True)
 
     all_matches = api_get("/matches")
+    all_matches = ensure_match_list(all_matches, "reports")
 
-    if all_matches and "error" not in all_matches:
+    if all_matches:
         finished_matches = [m for m in all_matches if m["status"].upper() in ("FINISHED",)]
 
         if not finished_matches:
@@ -904,39 +930,43 @@ with tab4:
     # ══════════════════════════════════════════════════════════════
     with debate_tab_teams:
         all_matches = api_get("/matches")
+        all_matches = ensure_match_list(all_matches, "teams")
         team_list = []
-        if all_matches and "error" not in all_matches:
+        if all_matches:
             teams_seen = set()
             for m in all_matches:
                 teams_seen.add(m["home_team"])
                 teams_seen.add(m["away_team"])
             team_list = sorted(t for t in teams_seen if t)
 
-        st.markdown('<div class="fd-arena">', unsafe_allow_html=True)
+        if len(team_list) < 2:
+            st.warning("Team debate is unavailable until the API returns at least two teams.")
+        else:
+            st.markdown('<div class="fd-arena">', unsafe_allow_html=True)
 
-        t_col1, t_div, t_col2 = st.columns([5, 0.4, 5])
-        with t_col1:
-            st.markdown('<div class="section-label">Team A</div>', unsafe_allow_html=True)
-            team_a = st.selectbox("team_a", team_list, key="debate_team_a", label_visibility="collapsed")
-        with t_div:
-            st.markdown("""
+            t_col1, t_div, t_col2 = st.columns([5, 0.4, 5])
+            with t_col1:
+                st.markdown('<div class="section-label">Team A</div>', unsafe_allow_html=True)
+                team_a = st.selectbox("team_a", team_list, key="debate_team_a", label_visibility="collapsed")
+            with t_div:
+                st.markdown("""
 <div class="fd-vs-divider">
     <div class="fd-vs-line"></div>
     <div class="fd-vs-text">VS</div>
     <div class="fd-vs-line"></div>
 </div>
 """, unsafe_allow_html=True)
-        with t_col2:
-            st.markdown('<div class="section-label">Team B</div>', unsafe_allow_html=True)
-            remaining = [t for t in team_list if t != team_a]
-            team_b = st.selectbox("team_b", remaining, key="debate_team_b", label_visibility="collapsed")
+            with t_col2:
+                st.markdown('<div class="section-label">Team B</div>', unsafe_allow_html=True)
+                remaining = [t for t in team_list if t != team_a]
+                team_b = st.selectbox("team_b", remaining, key="debate_team_b", label_visibility="collapsed")
 
-        st.markdown('</div>', unsafe_allow_html=True)  # close fd-arena
+            st.markdown('</div>', unsafe_allow_html=True)  # close fd-arena
 
-        st.markdown('<div style="display:flex;justify-content:center;margin:0.15rem 0 0 0;">', unsafe_allow_html=True)
-        gen_clicked_t = st.button("Generate Debate", key="debate_teams_btn")
-        st.markdown('</div>', unsafe_allow_html=True)
-        if gen_clicked_t:
+            st.markdown('<div style="display:flex;justify-content:center;margin:0.15rem 0 0 0;">', unsafe_allow_html=True)
+            gen_clicked_t = st.button("Generate Debate", key="debate_teams_btn")
+            st.markdown('</div>', unsafe_allow_html=True)
+            if gen_clicked_t:
                 st.session_state.pop("debate_result", None)
                 with st.spinner("Analyzing tournament data..."):
                     result = api_post("/debate/teams", {"teams": [team_a, team_b]})
@@ -945,16 +975,16 @@ with tab4:
                 elif result:
                     st.error(result["error"])
 
-        # Result
-        if "debate_result" in st.session_state and st.session_state["debate_result"].get("type") == "teams":
-            r = st.session_state["debate_result"]
-            label = " vs ".join(r.get("subjects", []))
-            close_col, _ = st.columns([1, 9])
-            with close_col:
-                if st.button("✕ Clear", key="debate_close_t"):
-                    del st.session_state["debate_result"]
-                    st.rerun()
-            st.markdown(f"""
+            # Result
+            if "debate_result" in st.session_state and st.session_state["debate_result"].get("type") == "teams":
+                r = st.session_state["debate_result"]
+                label = " vs ".join(r.get("subjects", []))
+                close_col, _ = st.columns([1, 9])
+                with close_col:
+                    if st.button("✕ Clear", key="debate_close_t"):
+                        del st.session_state["debate_result"]
+                        st.rerun()
+                st.markdown(f"""
 <div class="ai-modal">
     <div class="ai-modal-fixture">
         <div class="ai-modal-teams">{label}</div>
