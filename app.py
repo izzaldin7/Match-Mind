@@ -394,6 +394,15 @@ def format_score(home_score, away_score, status):
     return "vs"
 
 
+def kickoff_sort_value(match):
+    raw_time = match.get("kick_off_time") or ""
+    try:
+        hour, minute = raw_time.split()[0].split(":")
+        return int(hour) * 60 + int(minute)
+    except (AttributeError, IndexError, ValueError):
+        return 24 * 60
+
+
 def group_display(group):
     if not group:
         return ""
@@ -721,7 +730,7 @@ with tab1:
     if not data:
         st.markdown('<div class="match-card"><div style="text-align:center;color:#5a6070;padding:0.5rem;font-family:Inter,sans-serif;font-size:0.85rem;">No matches scheduled today.</div></div>', unsafe_allow_html=True)
     else:
-        for m in data:
+        for m in sorted(data, key=kickoff_sort_value):
             render_match_card(m, key_prefix="today")
 
 
