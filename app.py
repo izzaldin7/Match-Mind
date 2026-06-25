@@ -728,9 +728,9 @@ with tab2:
 
         def filter_matches(matches):
             if status_filter == "Upcoming":
-                return [m for m in matches if (m.get("status") or "").upper() not in ("FINISHED",)]
+                return [m for m in matches if m["status"].upper() not in ("FINISHED",)]
             elif status_filter == "Finished":
-                return [m for m in matches if (m.get("status") or "").upper() in ("FINISHED",)]
+                return [m for m in matches if m["status"].upper() in ("FINISHED",)]
             return matches
 
         def render_group_section(group_name, matches):
@@ -778,7 +778,7 @@ with tab3:
     all_matches = api_get("/matches")
 
     if all_matches and "error" not in all_matches:
-        finished_matches = [m for m in all_matches if (m.get("status") or "").upper() in ("FINISHED",)]
+        finished_matches = [m for m in all_matches if m["status"].upper() in ("FINISHED",)]
 
         if not finished_matches:
             st.markdown('<div style="color:#5a6070;font-size:0.85rem;padding:1rem 0;">No finished matches yet.</div>', unsafe_allow_html=True)
