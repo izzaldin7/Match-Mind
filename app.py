@@ -377,7 +377,7 @@ def ensure_match_list(data, label="matches"):
 
 def status_class(status):
     s = (status or "").upper()
-    if s in ("IN_PLAY", "PAUSED", "HALFTIME"):
+    if s in ("LIVE", "IN_PLAY", "PAUSED", "HALFTIME"):
         return "match-card-live", "status-live", "● LIVE"
     elif s in ("FINISHED",):
         return "match-card-finished", "status-finished", "FINISHED"
@@ -387,7 +387,7 @@ def status_class(status):
 
 def format_score(home_score, away_score, status):
     s = (status or "").upper()
-    if s in ("IN_PLAY", "PAUSED", "HALFTIME", "FINISHED"):
+    if s in ("LIVE", "IN_PLAY", "PAUSED", "HALFTIME", "FINISHED"):
         h = home_score if home_score is not None else "?"
         a = away_score if away_score is not None else "?"
         return f"{h} — {a}"
@@ -560,7 +560,7 @@ def render_match_card(m, key_prefix=""):
     kickoff_html = f'<span style="color:#5a6070;font-family:Inter,sans-serif;font-size:0.65rem;">⏱ {kickoff_val}</span>' if kickoff_val else ""
     meta_row = f'{group_badge_html}<span class="{status_cls}" style="font-family:\'Inter\',sans-serif;font-size:0.65rem;letter-spacing:1px;text-transform:uppercase;">{status_label}</span>{date_html}{kickoff_html}'
     is_finished = status_val.upper() in ("FINISHED",)
-    is_upcoming = status_val.upper() not in ("FINISHED", "IN_PLAY", "PAUSED", "HALFTIME")
+    is_upcoming = status_val.upper() not in ("FINISHED", "LIVE", "IN_PLAY", "PAUSED", "HALFTIME")
     mid = m['match_id']
     modal_key = f"ai_result_{mid}"
     lineup_key = f"lineup_result_{mid}"
