@@ -1,6 +1,9 @@
 from fastapi import Depends, FastAPI, HTTPException
 from contextlib import asynccontextmanager
 from datetime import datetime, time, timedelta, timezone
+from dotenv import load_dotenv
+import os
+import requests
 from pydantic import BaseModel
 from typing import List
 from database import Session, Match
@@ -26,6 +29,15 @@ from utils import (
 )
 from scheduler import start_scheduler
 
+load_dotenv()
+
+FOOTBALL_API_KEY = os.getenv("FOOTBALL_API_KEY")
+FOOTBALL_MATCHES_URL = "https://api.football-data.org/v4/competitions/WC/matches"
+FOOTBALL_HEADERS = {"X-Auth-Token": FOOTBALL_API_KEY}
+_football_matches_cache = {"timestamp": None, "matches": None}
+FOOTBALL_MATCHES_CACHE_SECONDS = 60
+
+
 @asynccontextmanager
 async def lifespan(app):
     scheduler = start_scheduler()
@@ -43,13 +55,18 @@ def get_db():
         session.close()
 
 
-def inferred_status(match):
-    status = match.status or ""
-    status_upper = status.upper()
-    if status_upper not in ("TIMED", "SCHEDULED"):
-        return status
+def score_value(match, side):
+    score = match.get("score") or {}
+    for key in ("fullTime", "regularTime", "current", "halfTime"):
+        score_block = score.get(key)
+        if isinstance(score_block, dict) and score_block.get(side) is not None:
+            return score_block.get(side)
+    return None
+
+
+def active_match_window(match):
     if not match.match_date or not match.kick_off_time:
-        return status
+        return False
 
     try:
         raw_time = match.kick_off_time.split()[0]
@@ -60,22 +77,74 @@ def inferred_status(match):
             tzinfo=timezone.utc
         )
     except (ValueError, TypeError):
-        return status
+        return False
 
     now = datetime.now(timezone.utc)
-    if kickoff <= now < kickoff + timedelta(hours=2, minutes=30):
-        return "LIVE"
-    return status
+    return kickoff <= now < kickoff + timedelta(hours=2, minutes=30)
+
+
+def football_matches():
+    now = datetime.now(timezone.utc)
+    cached_at = _football_matches_cache["timestamp"]
+    if (
+        cached_at
+        and _football_matches_cache["matches"] is not None
+        and (now - cached_at).total_seconds() < FOOTBALL_MATCHES_CACHE_SECONDS
+    ):
+        return _football_matches_cache["matches"]
+
+    if not FOOTBALL_API_KEY:
+        return []
+
+    try:
+        response = requests.get(FOOTBALL_MATCHES_URL, headers=FOOTBALL_HEADERS, timeout=8)
+        response.raise_for_status()
+        matches = response.json().get("matches", [])
+    except requests.exceptions.RequestException:
+        return _football_matches_cache["matches"] or []
+
+    _football_matches_cache["timestamp"] = now
+    _football_matches_cache["matches"] = matches
+    return matches
+
+
+def fresh_match_snapshot(match_id):
+    for match in football_matches():
+        if match.get("id") == match_id:
+            return {
+                "status": match.get("status"),
+                "home_score": score_value(match, "home"),
+                "away_score": score_value(match, "away"),
+            }
+    return None
 
 
 def serialize_match(match, include_date=True):
+    status = match.status or ""
+    home_score = match.home_score
+    away_score = match.away_score
+
+    if active_match_window(match) and (home_score is None or away_score is None):
+        fresh = fresh_match_snapshot(match.match_id)
+        if fresh:
+            fresh_home = fresh.get("home_score")
+            fresh_away = fresh.get("away_score")
+            if fresh_home is not None and fresh_away is not None:
+                status = fresh.get("status") or "LIVE"
+                home_score = fresh_home
+                away_score = fresh_away
+
+    status_upper = (status or "").upper()
+    if status_upper in ("TIMED", "SCHEDULED") and active_match_window(match) and home_score is not None and away_score is not None:
+        status = "LIVE"
+
     payload = {
         "match_id": match.match_id,
         "home_team": match.home_team,
         "away_team": match.away_team,
-        "status": inferred_status(match),
-        "home_score": match.home_score,
-        "away_score": match.away_score,
+        "status": status,
+        "home_score": home_score,
+        "away_score": away_score,
         "group": match.group_name,
         "kick_off_time": match.kick_off_time
     }
