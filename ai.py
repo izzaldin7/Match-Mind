@@ -116,7 +116,19 @@ def build_post_match_context(home_team, away_team, home_score, away_score, stage
                 team = team_row["team"]
                 if team not in (home_team, away_team):
                     continue
-                status = get_qualification_status(team_row)
+                status = get_qualification_status(team_row, standings_data)
+                played = team_row["played"]
+                remaining = 3 - played
+
+                if remaining == 0:
+                    if "ALREADY QUALIFIED" in status:
+                        next_fixture = "their group stage is complete — they advance to the Round of 32"
+                    elif "ELIMINATED" in status:
+                        next_fixture = "their tournament is over"
+                    else:
+                        next_fixture = "their group stage is complete — third-place route qualification pending results across other groups"
+                else:
+                    next_fixture = f"{remaining} group match(es) remaining"
 
                 qualification_notes.append(
                     f"{team}: {status}"
@@ -384,14 +396,20 @@ def generate_post_match_report(home_team, away_team, home_score, away_score, sta
       based strictly on the standings table above. If qualification updates are
       listed above, include them naturally here — e.g. "With this win, Mexico
       have secured their place in the Round of 32."
-    - A concise closing paragraph about what each side takes into the next match.
-      This paragraph must say something specific to THESE two teams and THIS
-      result — not a generic sentiment that could be pasted onto any match report.
-      Banned closing constructions, in any phrasing or variation: "build on this
-      momentum", "regroup and reassess", "bounce back from this defeat", "look
-      to maintain", "must improve their performance", "stage is set for". If your
-      closing sentence could be copy-pasted into a report about a different match
-      and still make sense, rewrite it until it couldn't be.
+    - A concise closing paragraph about what each side takes forward from this result.
+      MANDATORY: Check the qualification updates section for each team's "Next:" field
+      and follow it exactly:
+      — If "Next" says "their group stage is complete — they advance to the Round of 32",
+        write about what they take into the knockout stage. Do not mention group matches.
+      — If "Next" says "their tournament is over", write about how the tournament ends
+        for them. Do not mention future matches of any kind.
+      — If "Next" says "third-place route qualification pending", write about the wait
+        for results across other groups. Do not mention future matches for that team.
+      — If "Next" says "X group match(es) remaining", frame what this result means
+        heading into those specific remaining games.
+      This paragraph must say something specific to THESE two teams and THIS result.
+      Banned constructions in any form: "build on this momentum", "regroup and reassess",
+      "bounce back", "look to maintain", "must improve", "stage is set for".
 
     ABSOLUTE RULES — these cannot be broken under any circumstances:
     - Your report must be driven by the AVAILABLE DATA above. Use all available
@@ -470,7 +488,7 @@ def generate_player_debate(player_names, context_str, position_groups=None):
         focus = """
     These are defenders. Lead with defensive statistics: tackles, interceptions,
     duels won, and minutes played. Goals, assists, key passes, and passing accuracy
-    are genuine differentiators and should be discussed as meaningful bonuses —
+    are genuine differentiators, must be mentioned and should be discussed as meaningful bonuses —
     but they are secondary to defensive output. Do not treat a defender's attacking
     contribution as the primary measure of their tournament."""
 

@@ -383,70 +383,87 @@ def get_all_group_standings(exclude_match_id=None):
 
     return all_groups
 
-def get_third_place_table(exclude_match_id=None):
-    all_groups = get_all_group_standings(
-        exclude_match_id=exclude_match_id
+def _best_possible_position(row, all_standings):
+    """
+    Return the best position this team can realistically finish.
+    A team is definitely above us if their current points already
+    exceed our maximum possible, OR if they have the same or more
+    points and have played fewer or equal games (they can only maintain
+    or improve).
+    """
+    played = row["played"]
+    remaining = max(0, 3 - played)
+    max_pts = row["points"] + (remaining * 3)
+
+    teams_definitely_above = sum(
+        1 for other in all_standings
+        if other["team"] != row["team"]
+        and (
+            other["points"] > max_pts  # already unreachable
+            or (other["points"] >= max_pts and other["played"] <= played)  # at least equal and won't drop
+        )
     )
+    return teams_definitely_above + 1
 
-    third_place_teams = []
 
-    for group_name, standings in all_groups.items():
-        if len(standings) >= 3:
-            third = standings[2]
-
-            third_place_teams.append({
-                "group": group_name,
-                "team": third["team"],
-                "points": third["points"],
-                "gd": third["gd"],
-                "gf": third["gf"]
-            })
-
-    third_place_teams.sort(
-        key=lambda x: (
-            x["points"],
-            x["gd"],
-            x["gf"]
-        ),
-        reverse=True
-    )
-
-    return third_place_teams
-
-def can_still_reach_best_third_place(row):
+def can_still_reach_best_third_place(row, all_standings=None):
     played = row["played"]
     pts = row["points"]
-
     remaining = max(0, 3 - played)
-
     max_possible_points = pts + (remaining * 3)
 
-    # Any team that can still reach 4+ points
-    # is definitely alive in a 12-group format.
-    if max_possible_points >= 4:
-        return True
+    # If we can't even get 3 points total, definitely out
+    if max_possible_points < 3:
+        return False
 
-    # A team that can still reach 3 points
-    # cannot be ruled out mathematically.
-    if max_possible_points == 3:
-        return True
+    # If group standings provided, check if 4th place finish is unavoidable
+    if all_standings:
+        best_pos = _best_possible_position(row, all_standings)
+        if best_pos > 3:
+            return False  # can't finish better than 4th, never qualifies
 
-    return False
+    return True
 
-def get_qualification_status(row):
+
+def get_qualification_status(row, all_standings=None):
     played = row["played"]
     pts = row["points"]
-
     remaining = 3 - played
     max_possible = pts + (remaining * 3)
 
+    # If all games played, position is final — use it directly
+    if played == 3 and all_standings:
+        final_pos = _best_possible_position(row, all_standings)
+        if final_pos == 1 or final_pos == 2:
+            return "ALREADY QUALIFIED for the Round of 32 (top-two spot secured)"
+        elif final_pos == 3:
+            return (
+                "STILL ALIVE. Automatic qualification is no longer possible, "
+                "but qualification through the best third-placed teams route "
+                "remains mathematically possible."
+            )
+        else:
+            return "ELIMINATED — cannot finish higher than 4th in the group"
+
+    # Mid-tournament checks for teams still playing
     if pts >= 6:
         return "ALREADY QUALIFIED for the Round of 32 (top-two spot secured)"
+
+    if all_standings:
+        best_pos = _best_possible_position(row, all_standings)
+        if best_pos > 3:
+            return "ELIMINATED — cannot finish higher than 4th in the group"
+        if best_pos > 2 and max_possible < 4:
+            return (
+                "STILL ALIVE. Automatic qualification is no longer possible, "
+                "but qualification through the best third-placed teams route "
+                "remains mathematically possible."
+            )
 
     if pts == 4 and played == 2:
         return "likely qualified but not yet mathematically confirmed (strong position)"
 
-    if not can_still_reach_best_third_place(row):
+    if not can_still_reach_best_third_place(row, all_standings):
         return "ELIMINATED"
 
     if played == 2 and max_possible <= 3:
@@ -519,7 +536,7 @@ def format_qualification_scenarios_for_prompt(group_name, home_team, away_team, 
         gd = row["gd"]
         max_possible = pts + (remaining * 3)
 
-        status = get_qualification_status(row)
+        status = get_qualification_status(row, standings)
 
         lines.append(f"  {team}: {pts} pt(s), played {played}, GD {gd} — {status}.")
 

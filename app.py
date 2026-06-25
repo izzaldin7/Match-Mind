@@ -16,7 +16,7 @@ st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
 
-    .stApp { background-color: #0a0e1a; color: #e8eaf0; }
+    .stApp { background-color: #0b0b0d; color: #e8eaf0; }
     #MainMenu, footer, header {visibility: hidden;}
     .block-container {padding: 2rem 3rem;}
 
@@ -28,7 +28,7 @@ st.markdown("""
         letter-spacing: 4px;
         line-height: 1;
     }
-    .mm-logo span { color: #FFD700; }
+    .mm-logo span { color: #E8C547; }
     .mm-tagline {
         font-family: 'Inter', sans-serif;
         font-size: 0.7rem;
@@ -40,7 +40,7 @@ st.markdown("""
     }
     .mm-divider {
         height: 1px;
-        background: linear-gradient(90deg, transparent 0%, #FFD700 30%, #FF8C00 70%, transparent 100%);
+        background: linear-gradient(90deg, transparent 0%, #E8C547 30%, #C4A96B 70%, transparent 100%);
         margin: 1rem auto 2rem auto;
         opacity: 0.5;
         max-width: 600px;
@@ -64,8 +64,8 @@ st.markdown("""
         background: transparent;
     }
     .stTabs [aria-selected="true"] {
-        color: #FFD700 !important;
-        border-bottom: 2px solid #FFD700 !important;
+        color: #E8C547 !important;
+        border-bottom: 2px solid #E8C547 !important;
         background: transparent !important;
     }
     .stTabs [data-baseweb="tab-panel"] { padding-top: 2rem; }
@@ -79,21 +79,21 @@ st.markdown("""
     }
 
     .match-card {
-        background: #0f1525;
+        background: #111115;
         border: 1px solid #1a2035;
         border-radius: 4px 4px 0 0;
         padding: 0.75rem 1.5rem;
         margin-bottom: 0;
         transition: border-color 0.2s;
     }
-    .match-card:hover { border-color: #FFD70030; }
+    .match-card:hover { border-color: #E8C54730; }
     .match-card-live { border-left: 3px solid #ff3b5c; }
-    .match-card-finished { border-left: 3px solid #FF8C00; }
-    .match-card-upcoming { border-left: 3px solid #FFD700; }
+    .match-card-finished { border-left: 3px solid #C4A96B; }
+    .match-card-upcoming { border-left: 3px solid #E8C547; }
 
     .status-live { color: #ff3b5c; font-weight: 600; animation: pulse 2s infinite; }
-    .status-finished { color: #FF8C00; }
-    .status-upcoming { color: #FFD700; }
+    .status-finished { color: #C4A96B; }
+    .status-upcoming { color: #E8C547; }
 
     @keyframes pulse {
         0%, 100% {opacity: 1;}
@@ -104,17 +104,17 @@ st.markdown("""
         display: inline-block;
         font-family: 'JetBrains Mono', monospace;
         font-size: 0.65rem;
-        color: #FFD700;
-        background: #FFD70015;
-        border: 1px solid #FFD70030;
+        color: #E8C547;
+        background: #E8C54715;
+        border: 1px solid #E8C54730;
         padding: 0.15rem 0.5rem;
         border-radius: 2px;
         letter-spacing: 1px;
     }
 
     .ai-modal {
-        background: #0d1220;
-        border: 1px solid #FFD70030;
+        background: #0d0d10;
+        border: 1px solid #E8C54730;
         border-radius: 6px;
         padding: 2rem;
         margin-top: 0.5rem;
@@ -129,7 +129,7 @@ st.markdown("""
         font-family: 'Bebas Neue', sans-serif;
         font-size: 1.6rem;
         letter-spacing: 3px;
-        color: #FFD700;
+        color: #E8C547;
         margin-bottom: 1.25rem;
         padding-bottom: 0.75rem;
         border-bottom: 1px solid #1a2035;
@@ -150,7 +150,7 @@ st.markdown("""
         font-family: 'JetBrains Mono', monospace;
         font-size: 2.5rem;
         font-weight: 500;
-        color: #FFD700;
+        color: #E8C547;
         margin: 0.25rem 0;
     }
     .ai-modal-sub {
@@ -169,16 +169,16 @@ st.markdown("""
         letter-spacing: 2px;
         text-transform: uppercase;
         background: transparent;
-        color: #FFD700;
-        border: 1px solid #FFD70040;
+        color: #E8C547;
+        border: 1px solid #E8C54740;
         border-radius: 3px;
         padding: 0.5rem 1.25rem;
         transition: all 0.2s;
         width: 100%;
     }
     .stButton button:hover {
-        background: #FFD70010;
-        border-color: #FFD700;
+        background: #E8C54710;
+        border-color: #E8C547;
     }
 
     .stSelectbox label {
@@ -189,12 +189,12 @@ st.markdown("""
         color: #5a6070;
     }
     .stAlert {
-        background: #0f1525;
+        background: #111115;
         border-color: #1a2035;
         font-family: 'Inter', sans-serif;
         font-size: 0.85rem;
     }
-    .stSpinner { color: #FFD700; }
+    .stSpinner { color: #E8C547; }
     .section-label {
         font-family: 'Inter', sans-serif;
         font-size: 0.65rem;
@@ -205,7 +205,7 @@ st.markdown("""
     }
 
     .standings-wrap {
-        background: #0f1525;
+        background: #111115;
         border: 1px solid #1a2035;
         border-radius: 4px;
         padding: 1rem 1.25rem;
@@ -215,7 +215,7 @@ st.markdown("""
         display: flex;
         align-items: center;
         padding: 0.4rem 0;
-        border-bottom: 1px solid #0a0e1a;
+        border-bottom: 1px solid #0b0b0d;
         font-family: 'Inter', sans-serif;
         font-size: 0.8rem;
     }
@@ -245,26 +245,34 @@ st.markdown("""
         font-size: 0.65rem !important;
         color: #5a6070 !important;
         border-color: #1a2035 !important;
-        background: #0f1525 !important;
+        background: #111115 !important;
         white-space: nowrap !important;
         overflow: hidden !important;
         text-overflow: ellipsis !important;
     }
     div[data-testid="stHorizontalBlock"] div[data-testid="stButton"] button:hover {
-        color: #FFD700 !important;
-        border-color: #FFD70040 !important;
-        background: #FFD70010 !important;
+        color: #E8C547 !important;
+        border-color: #E8C54740 !important;
+        background: #E8C54710 !important;
     }
     div[data-testid="column"] + div[data-testid="column"] {
         padding-left: 1rem !important;
     }
+    div[data-testid="stHorizontalBlock"] div[data-testid="column"]:has(div[data-testid="stButton"]) + div[data-testid="column"]:has(div[data-testid="stButton"]) {
+        padding-left: 0.4rem !important;
+    }
+    div[data-testid="stHorizontalBlock"] div[data-testid="column"]:has(div[data-testid="stButton"]) {
+        flex: 0 0 auto !important;
+        min-width: 0 !important;
+        width: fit-content !important;
+    }
     .s-team { flex: 3; color: #e8eaf0; font-weight: 600; }
-    .s-team-gold { flex: 3; color: #FFD700; font-weight: 600; }
+    .s-team-gold { flex: 3; color: #E8C547; font-weight: 600; }
     .s-num { flex: 1; text-align: center; color: #c8cad4; }
-    .s-pts { flex: 1; text-align: center; color: #FFD700; font-family: 'JetBrains Mono', monospace; font-weight: 600; }
+    .s-pts { flex: 1; text-align: center; color: #E8C547; font-family: 'JetBrains Mono', monospace; font-weight: 600; }
             
     .fd-arena {
-        background: #0f1525;
+        background: #111115;
         border: 1px solid #1a2035;
         border-radius: 4px;
         padding: 1.5rem;
@@ -283,7 +291,7 @@ st.markdown("""
         font-family: 'Bebas Neue', sans-serif;
         font-size: 1.1rem;
         letter-spacing: 3px;
-        color: #FFD700;
+        color: #E8C547;
         opacity: 0.6;
     }
     .fd-streak { display: flex; gap: 4px; margin-top: 1rem; }
@@ -291,13 +299,13 @@ st.markdown("""
         width: 5px; height: 5px; border-radius: 50%;
         background: #1a2035; transition: background 0.3s;
     }
-    .fd-dot-filled { background: #FFD700; }
+    .fd-dot-filled { background: #E8C547; }
     .fd-slot-num {
         font-family: 'JetBrains Mono', monospace;
         font-size: 0.6rem;
-        color: #FFD700;
-        background: #FFD70015;
-        border: 1px solid #FFD70030;
+        color: #E8C547;
+        background: #E8C54715;
+        border: 1px solid #E8C54730;
         border-radius: 2px;
         padding: 0.1rem 0.4rem;
         margin-bottom: 0.3rem;
@@ -383,7 +391,7 @@ def format_ai_text(text):
             body_lines = [html.escape(line) for line in lines[1:] if line.strip()]
             lines_html.append(
                 f'<p style="font-family:\'Bebas Neue\',sans-serif;font-size:1.25rem;'
-                f'letter-spacing:2px;color:#FFD700;margin:1.1rem 0 0.45rem 0;">{heading_text}</p>'
+                f'letter-spacing:2px;color:#E8C547;margin:1.1rem 0 0.45rem 0;">{heading_text}</p>'
             )
             if body_lines:
                 lines_html.append(f'<p style="margin:0 0 1.2rem 0;">{"<br>".join(body_lines)}</p>')
@@ -470,10 +478,10 @@ def render_lineup_card(lineup_data, home_team, away_team):
 
     def render_team_column(col, team_name, formation, starters, subs):
         with col:
-            badge = f'<span style="font-family:\'JetBrains Mono\',monospace;font-size:0.65rem;color:#5a6070;background:#0a0e1a;border:1px solid #1a2035;border-radius:2px;padding:0.1rem 0.5rem;letter-spacing:2px;">{formation}</span>' if formation else ""
+            badge = f'<span style="font-family:\'JetBrains Mono\',monospace;font-size:0.65rem;color:#5a6070;background:#0b0b0d;border:1px solid #1a2035;border-radius:2px;padding:0.1rem 0.5rem;letter-spacing:2px;">{formation}</span>' if formation else ""
             st.markdown(f"""
 <div style="text-align:center;margin-bottom:0.75rem;">
-    <div style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;letter-spacing:3px;color:#FFD700;margin-bottom:0.3rem;">{team_name}</div>
+    <div style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;letter-spacing:3px;color:#E8C547;margin-bottom:0.3rem;">{team_name}</div>
     {badge}
 </div>
 """, unsafe_allow_html=True)
@@ -484,10 +492,10 @@ def render_lineup_card(lineup_data, home_team, away_team):
                 num = p.get("number") or "—"
                 name = p.get("name") or ""
                 pos = p.get("position") or ""
-                pos_color = "#FF8C00" if "goalkeeper" in pos.lower() else "#4a6fa5"
+                pos_color = "#C4A96B" if "goalkeeper" in pos.lower() else "#4a6fa5"
                 pos_short = pos[:3].upper() if pos else ""
                 st.markdown(f"""
-<div style="display:flex;align-items:center;gap:0.6rem;padding:0.3rem 0.5rem;border-bottom:1px solid #0f1525;">
+<div style="display:flex;align-items:center;gap:0.6rem;padding:0.3rem 0.5rem;border-bottom:1px solid #0d0d10;">
     <div style="font-family:'JetBrains Mono',monospace;font-size:0.65rem;color:{pos_color};width:20px;text-align:center;flex-shrink:0;">{num}</div>
     <div style="font-family:'Inter',sans-serif;font-size:0.8rem;color:#e8eaf0;flex:1;">{name}</div>
     <div style="font-family:'Inter',sans-serif;font-size:0.58rem;color:#5a6070;letter-spacing:0.5px;">{pos_short}</div>
@@ -502,7 +510,7 @@ def render_lineup_card(lineup_data, home_team, away_team):
                     pos = s.get("position") or ""
                     pos_short = pos[:3].upper() if pos else ""
                     st.markdown(f"""
-<div style="display:flex;align-items:center;gap:0.6rem;padding:0.25rem 0.5rem;border-bottom:1px solid #0a0e1a;">
+<div style="display:flex;align-items:center;gap:0.6rem;padding:0.25rem 0.5rem;border-bottom:1px solid #0b0b0d;">
     <div style="font-family:'JetBrains Mono',monospace;font-size:0.65rem;color:#3a4060;width:20px;text-align:center;flex-shrink:0;">{num}</div>
     <div style="font-family:'Inter',sans-serif;font-size:0.78rem;color:#8a8ea8;flex:1;">{name}</div>
     <div style="font-family:'Inter',sans-serif;font-size:0.58rem;color:#5a6070;">{pos_short}</div>
@@ -539,7 +547,7 @@ def render_match_card(m, key_prefix=""):
 <div class="match-card {card_class}">
     <div style="display:flex;align-items:center;justify-content:center;gap:1.5rem;">
         <div style="font-family:'Bebas Neue',sans-serif;font-size:1.3rem;letter-spacing:2px;color:#ffffff;text-align:right;flex:1;">{m['home_team']}</div>
-        <div style="font-family:'JetBrains Mono',monospace;font-size:1.3rem;font-weight:500;color:#FFD700;min-width:90px;text-align:center;line-height:1;position:relative;top:-2px;">{score}</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:1.3rem;font-weight:500;color:#E8C547;min-width:90px;text-align:center;line-height:1;position:relative;top:-2px;">{score}</div>
         <div style="font-family:'Bebas Neue',sans-serif;font-size:1.3rem;letter-spacing:2px;color:#ffffff;text-align:left;flex:1;">{m['away_team']}</div>
     </div>
     <div style="display:flex;align-items:center;justify-content:center;gap:0.75rem;margin-top:0.5rem;">
@@ -574,7 +582,7 @@ def render_match_card(m, key_prefix=""):
                     elif result:
                         st.error(result["error"])
         else:
-            sub1, sub2, _ = st.columns([2, 2, 8])
+            sub1, sub2, _ = st.columns([1.6, 1.6, 10])
             with sub1:
                 action_label = "Briefing" if is_upcoming else "Report"
                 if st.button(action_label, key=f"{key_prefix}_action_{mid}"):
@@ -804,7 +812,7 @@ with tab4:
 
         count = st.session_state["debate_player_count"]
 
-        st.markdown('</div class="fd-arena">', unsafe_allow_html=True)
+        st.markdown('<div class="fd-arena">', unsafe_allow_html=True)
 
         arena_col1, arena_div, arena_col2 = st.columns([5, 0.4, 5])
         with arena_col1:
@@ -828,6 +836,8 @@ with tab4:
             st.markdown(f'<div style="margin-top:0.75rem;"><span class="fd-slot-num">Player {i+1}</span></div>', unsafe_allow_html=True)
             val = st.text_input(f"extra_p{i}", key=f"debate_player_{i}", label_visibility="collapsed", placeholder=f"Player {i+1} name")
             extra_inputs.append(val)
+
+        st.markdown('</div>', unsafe_allow_html=True)  # close fd-arena
 
         dots_html = "".join(
             f'<div class="fd-dot {"fd-dot-filled" if i < count else ""}"></div>'
@@ -901,7 +911,7 @@ with tab4:
                 teams_seen.add(m["away_team"])
             team_list = sorted(t for t in teams_seen if t)
 
-        st.markdown('</div class="fd-arena">', unsafe_allow_html=True)
+        st.markdown('<div class="fd-arena">', unsafe_allow_html=True)
 
         t_col1, t_div, t_col2 = st.columns([5, 0.4, 5])
         with t_col1:
@@ -919,6 +929,8 @@ with tab4:
             st.markdown('<div class="section-label">Team B</div>', unsafe_allow_html=True)
             remaining = [t for t in team_list if t != team_a]
             team_b = st.selectbox("team_b", remaining, key="debate_team_b", label_visibility="collapsed")
+
+        st.markdown('</div>', unsafe_allow_html=True)  # close fd-arena
 
         st.markdown('<div style="display:flex;justify-content:center;margin:0.15rem 0 0 0;">', unsafe_allow_html=True)
         gen_clicked_t = st.button("Generate Debate", key="debate_teams_btn")
