@@ -1247,6 +1247,10 @@ def get_head_to_head(home_team, away_team):
 
 
 def get_team_tournament_form(team_name, exclude_match_id=None):
+    # Ensure _tournament_stats_cache is populated before the reconciliation
+    # pass below reads from it. No-op if all finished matches already processed.
+    build_tournament_cache()
+
     team_id = get_highlightly_team_id(team_name)
     if not team_id:
         return None

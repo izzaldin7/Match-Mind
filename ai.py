@@ -9,6 +9,7 @@ from utils import (
     get_head_to_head,
     get_team_tournament_form,
     get_group_standings,
+    get_all_group_standings,
     format_discipline_watch_for_prompt,
     format_recent_match_context_for_prompt,
     format_recent_standout_performers_for_prompt,
@@ -111,12 +112,13 @@ def build_post_match_context(home_team, away_team, home_score, away_score, stage
 
         qualification_notes = []
         standings_data = get_group_standings(group, up_to_date=match_date)
+        all_group_standings = get_all_group_standings()
         if standings_data:
             for team_row in standings_data:
                 team = team_row["team"]
                 if team not in (home_team, away_team):
                     continue
-                status = get_qualification_status(team_row, standings_data)
+                status = get_qualification_status(team_row, standings_data, all_group_standings)
                 played = team_row["played"]
                 remaining = 3 - played
 
