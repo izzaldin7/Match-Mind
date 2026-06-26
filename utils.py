@@ -385,25 +385,177 @@ def get_all_group_standings(exclude_match_id=None):
 
 def _best_possible_position(row, all_standings):
     """
-    Return the best position this team can realistically finish.
-    A team is definitely above us if their current points already
-    exceed our maximum possible, OR if they have the same or more
-    points and have played fewer or equal games (they can only maintain
-    or improve).
+    Return the best position this team can realistically finish in its group.
+
+    A rival is DEFINITIVELY above us in one of these situations:
+      1. Their current points already exceed our maximum possible points.
+      2. They have strictly more points AND a game in hand (they can only
+         maintain or extend their lead).
+      3. Equal points, equal games played, but their GD already beats ours
+         AND their GF beats ours — meaning even if we win our remaining
+         games identically, the current tiebreaker goes against us.
+         (This is conservative: we only lock it in when BOTH GD and GF
+         already favour the rival, since future scorelines can shift both.)
+
+    Note: GD can always swing with remaining matches, so we only treat it
+    as decisive when the rival is locked on the same points trajectory
+    (same games played, same remaining games) and already ahead on both
+    GD and GF — i.e., we can't catch them even in the tiebreaker columns.
     """
     played = row["played"]
     remaining = max(0, 3 - played)
     max_pts = row["points"] + (remaining * 3)
+    my_pts = row["points"]
+    my_gd = row["gd"]
+    my_gf = row["gf"]
 
-    teams_definitely_above = sum(
-        1 for other in all_standings
-        if other["team"] != row["team"]
-        and (
-            other["points"] > max_pts  # already unreachable
-            or (other["points"] >= max_pts and other["played"] <= played)  # at least equal and won't drop
-        )
-    )
+    def definitely_above(other):
+        if other["team"] == row["team"]:
+            return False
+        # Case 1: points gap is unbridgeable
+        if other["points"] > max_pts:
+            return True
+        # Case 2: strictly more points with a game in hand
+        if other["points"] > my_pts and other["played"] < played:
+            return True
+        # Case 3: same points, same games played — rival leads on BOTH GD and GF
+        # GF tiebreaker only matters when GD is level, but if rival is ahead on
+        # GD already, that's the operative tiebreaker; we include GF check only
+        # when GD is tied to reflect FIFA's actual ordering (pts → GD → GF).
+        if other["points"] == my_pts and other["played"] == played:
+            if other["gd"] > my_gd:
+                return True          # ahead on GD, we can't move GD back in time
+            if other["gd"] == my_gd and other["gf"] > my_gf:
+                return True          # GD level, but rival leads on GF
+        return False
+
+    teams_definitely_above = sum(1 for other in all_standings if definitely_above(other))
     return teams_definitely_above + 1
+
+
+def evaluate_third_place_cross_group(row, all_group_standings):
+    """
+    Given a team currently in (or possibly finishing in) 3rd place, evaluate
+    their chances across ALL groups' 3rd-placed teams.
+
+    At WC 2026 there are 12 groups; the top 8 third-placed teams qualify.
+    So a 3rd-placed team needs to be in the top 8 of the 12 thirds.
+
+    Tiebreakers between equal-points thirds follow FIFA ordering:
+      points → goal difference → goals for
+
+    Returns one of:
+      "ALREADY QUALIFIED via 3rd-place"
+          — at most 7 other thirds can possibly finish above this team
+            (i.e., ≥ 4 thirds are permanently below, so a top-8 finish
+            is mathematically guaranteed).
+      "ELIMINATED via 3rd-place"
+          — 8 or more other thirds are permanently above this team's
+            maximum possible standing (points + GD), making top-8
+            mathematically impossible.
+      "STILL ALIVE via 3rd-place"
+          — neither of the above.
+    """
+    pts = row["points"]
+    my_gd = row["gd"]
+    my_gf = row["gf"]
+    remaining = max(0, 3 - row["played"])
+    max_pts = pts + remaining * 3
+
+    # Collect all other groups' current 3rd-placed teams
+    other_thirds = []
+    my_team = row["team"]
+    for group_name, standings in all_group_standings.items():
+        if len(standings) < 3:
+            continue
+        third = standings[2]   # index 2 = 3rd position
+        if third["team"] == my_team:
+            continue
+        other_thirds.append(third)
+
+    def is_locked_above(t):
+        """
+        True if rival third 't' will ALWAYS rank above us, no matter what
+        we do in our remaining match(es).
+        - Their points already exceed our maximum possible: certain.
+        - Points equal to our max AND their GD already beats ours: since our
+          remaining match(es) can swing our GD in either direction but we
+          can't change their GD, this is only truly "locked" if they've also
+          finished all games (remaining == 0 for them). Otherwise future
+          matches could widen or close the gap for both sides.
+        """
+        t_remaining = max(0, 3 - t["played"])
+        if t["points"] > max_pts:
+            return True   # points gap is unbridgeable
+        # GD sub-check: only valid when BOTH teams have played all 3 games
+        # (i.e., both GDs are final). If we still have a game left we could
+        # win it and improve our GD, potentially leapfrogging a rival who's
+        # already finished but matches our max-points total.
+        if t["points"] == max_pts and t_remaining == 0 and remaining == 0:
+            if t["gd"] > my_gd:
+                return True
+            if t["gd"] == my_gd and t["gf"] > my_gf:
+                return True
+        return False
+
+    def is_locked_below(t):
+        """
+        True if rival third 't' can NEVER reach our current standing.
+        - Their maximum possible points are less than our current points: certain.
+        - If max possible equals our points, they'd need to match us on GD and GF
+          too — if our GD already leads them AND they've played all games,
+          they can't catch us on the tiebreaker either.
+        """
+        t_max_pts = t["points"] + max(0, 3 - t["played"]) * 3
+        t_remaining = max(0, 3 - t["played"])
+        if t_max_pts < pts:
+            return True   # can't reach our current points total
+        # GD sub-check: only valid when BOTH teams have played all 3 games.
+        # If they still have a game left they could improve their GD and
+        # potentially match or pass ours even at equal points.
+        if t_max_pts == pts and t_remaining == 0 and remaining == 0:
+            if my_gd > t["gd"]:
+                return True
+            if my_gd == t["gd"] and my_gf > t["gf"]:
+                return True
+        return False
+
+    locked_above = sum(1 for t in other_thirds if is_locked_above(t))
+    locked_below = sum(1 for t in other_thirds if is_locked_below(t))
+
+    # 8 or more thirds permanently above → can never make top-8
+    if locked_above >= 8:
+        return "ELIMINATED via 3rd-place"
+
+    # ≥ 4 thirds permanently below → at most 7 others can beat us → top-8 guaranteed
+    # (11 other thirds; need locked_below >= 11 - 7 = 4)
+    if locked_below >= (len(other_thirds) - 7):
+        return "ALREADY QUALIFIED via 3rd-place"
+
+    return "STILL ALIVE via 3rd-place"
+
+
+def _final_position(row, all_standings):
+    """
+    Return the actual final group position (1-based) for a team that has
+    played all 3 games, using the same sort key as get_group_standings:
+      primary   → points (desc)
+      secondary → goal difference (desc)
+      tertiary  → goals for (desc)
+
+    This is intentionally separate from _best_possible_position, which is
+    used for mid-tournament projections. Once all games are played there is
+    no uncertainty — the tiebreakers determine the real rank directly.
+    """
+    sorted_rows = sorted(
+        all_standings,
+        key=lambda r: (r["points"], r["gd"], r["gf"]),
+        reverse=True
+    )
+    for i, r in enumerate(sorted_rows):
+        if r["team"] == row["team"]:
+            return i + 1
+    return len(sorted_rows)   # fallback (should never happen)
 
 
 def can_still_reach_best_third_place(row, all_standings=None):
@@ -425,47 +577,98 @@ def can_still_reach_best_third_place(row, all_standings=None):
     return True
 
 
-def get_qualification_status(row, all_standings=None):
+def get_qualification_status(row, all_standings=None, all_group_standings=None):
+    """
+    Determine a team's qualification status.
+
+    Parameters
+    ----------
+    row : dict
+        This team's standings row (points, played, gd, …).
+    all_standings : list[dict] | None
+        All rows for this team's own group (used for within-group position maths).
+    all_group_standings : dict[str, list[dict]] | None
+        Standings for EVERY group, keyed by group name.  Used to evaluate the
+        cross-group 3rd-place competition.  Pass the result of
+        get_all_group_standings() to get full accuracy.
+    """
     played = row["played"]
     pts = row["points"]
     remaining = 3 - played
     max_possible = pts + (remaining * 3)
 
-    # If all games played, position is final — use it directly
-    if played == 3 and all_standings:
-        final_pos = _best_possible_position(row, all_standings)
-        if final_pos == 1 or final_pos == 2:
-            return "ALREADY QUALIFIED for the Round of 32 (top-two spot secured)"
-        elif final_pos == 3:
-            return (
-                "STILL ALIVE. Automatic qualification is no longer possible, "
-                "but qualification through the best third-placed teams route "
-                "remains mathematically possible."
-            )
-        else:
-            return "ELIMINATED — cannot finish higher than 4th in the group"
-
-    # Mid-tournament checks for teams still playing
-    if pts >= 6:
-        return "ALREADY QUALIFIED for the Round of 32 (top-two spot secured)"
+    # ── Step 1: within-group position check ───────────────────────────────────
 
     if all_standings:
         best_pos = _best_possible_position(row, all_standings)
         if best_pos > 3:
             return "ELIMINATED — cannot finish higher than 4th in the group"
-        if best_pos > 2 and max_possible < 4:
-            return (
-                "STILL ALIVE. Automatic qualification is no longer possible, "
-                "but qualification through the best third-placed teams route "
-                "remains mathematically possible."
-            )
 
+    # ── Step 2: already-secured top-2 checks ─────────────────────────────────
+
+    # All games played — use _final_position for exact rank via pts/GD/GF sort
+    if played == 3 and all_standings:
+        final_pos = _final_position(row, all_standings)
+        if final_pos <= 2:
+            return "ALREADY QUALIFIED for the Round of 32 (top-two spot secured)"
+        elif final_pos == 3:
+            if all_group_standings:
+                cross = evaluate_third_place_cross_group(row, all_group_standings)
+                if cross == "ALREADY QUALIFIED via 3rd-place":
+                    return "ALREADY QUALIFIED for the Round of 32 (best third-place spot secured)"
+                elif cross == "ELIMINATED via 3rd-place":
+                    return "ELIMINATED — finished 3rd but cannot reach top-8 third-place spots"
+            return (
+                "STILL ALIVE — finished 3rd. Qualification depends on being among "
+                "the 8 best third-placed teams across all 12 groups."
+            )
+        else:
+            return "ELIMINATED — cannot finish higher than 4th in the group"
+
+    # Mid-tournament shortcut: 6+ points locks top-2 in any group
+    if pts >= 6:
+        return "ALREADY QUALIFIED for the Round of 32 (top-two spot secured)"
+
+    # 4 points after 2 games is a very strong (likely but unconfirmed) top-2
     if pts == 4 and played == 2:
-        return "likely qualified but not yet mathematically confirmed (strong position)"
+        return "likely qualified but not yet mathematically confirmed (strong top-two position)"
+
+    # ── Step 3: teams who can still finish 1st or 2nd ────────────────────────
+
+    if all_standings:
+        best_pos = _best_possible_position(row, all_standings)
+        if best_pos <= 2:
+            # They can still reach top-2 — don't demote to 3rd-place route yet
+            return "qualification still to be decided"
+
+    # ── Step 4: teams who can ONLY finish 3rd at best ────────────────────────
+    # (best_pos == 3, or no group standings available but can't reach top-2)
 
     if not can_still_reach_best_third_place(row, all_standings):
         return "ELIMINATED"
 
+    # Check the cross-group 3rd-place picture if we have it
+    if all_group_standings:
+        cross = evaluate_third_place_cross_group(row, all_group_standings)
+        if cross == "ELIMINATED via 3rd-place":
+            return (
+                "ELIMINATED — even with a win, cannot reach the top-8 third-place spots "
+                "(8 or more other thirds already have an unreachable points lead)"
+            )
+        elif cross == "ALREADY QUALIFIED via 3rd-place":
+            return (
+                "ALREADY QUALIFIED for the Round of 32 (3rd-place spot secured — "
+                "fewer than 4 other thirds can mathematically surpass this team's total)"
+            )
+        else:
+            # STILL ALIVE via 3rd-place
+            return (
+                "STILL ALIVE. Automatic top-two qualification is no longer possible, "
+                "but qualification through the best third-placed teams route remains "
+                "mathematically possible."
+            )
+
+    # Fallback when no cross-group data is available
     if played == 2 and max_possible <= 3:
         return (
             "STILL ALIVE. Automatic qualification is no longer possible, "
@@ -525,6 +728,9 @@ def format_qualification_scenarios_for_prompt(group_name, home_team, away_team, 
     if home_team not in rows or away_team not in rows:
         return None
 
+    # Fetch cross-group standings for 3rd-place evaluation
+    all_group_standings = get_all_group_standings(exclude_match_id=exclude_match_id)
+
     lines = [f"Qualification picture for {_display_group_name(group_name)}:"]
     lines.append("Tournament format: 12 groups, top 2 from each group qualify automatically. 8 best third-place teams also qualify.")
 
@@ -534,9 +740,8 @@ def format_qualification_scenarios_for_prompt(group_name, home_team, away_team, 
         remaining = 3 - played
         pts = row["points"]
         gd = row["gd"]
-        max_possible = pts + (remaining * 3)
 
-        status = get_qualification_status(row, standings)
+        status = get_qualification_status(row, standings, all_group_standings)
 
         lines.append(f"  {team}: {pts} pt(s), played {played}, GD {gd} — {status}.")
 
@@ -548,11 +753,11 @@ def format_qualification_scenarios_for_prompt(group_name, home_team, away_team, 
                 lines.append(f"    Negative GD means margin of victory matters if it comes to tiebreakers.")
 
     lines.append(
-    "  Note: third-place qualification is determined across all 12 groups. "
-    "This analysis can identify teams still alive via the third-place route "
-    "but cannot determine whether a third-placed team has mathematically "
-    "secured or lost one of the eight qualifying spots."
-)
+        "  Note: third-place qualification is determined across all 12 groups. "
+        "Cross-group comparison is included above where data is available, "
+        "but tiebreakers between equal-points thirds (GD, GF, disciplinary record) "
+        "are not yet computed and could affect the final ranking."
+    )
     return "\n".join(lines)
 
 
