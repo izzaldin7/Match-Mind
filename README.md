@@ -1,6 +1,6 @@
 # MatchMind
 
-A football analytics API built for the 2026 FIFA World Cup. MatchMind pulls live match data, enriches it with player and team statistics from Highlightly, and uses Groq (Llama 3.3 70B) to generate pre-match briefings, post-match reports, and data-driven player/team debate breakdowns.
+MatchMind is an AI-powered football analytics platform that combines live World Cup data, player statistics, and large language models to generate match briefings, post-match reports and data-driven player and team comparisons in real time. It pulls live match data, enriches it with player and team statistics from Highlightly, and uses Groq (Llama 3.3 70B) to generate pre-match briefings, post-match reports, and data-driven player/team debate breakdowns.
 
 **Live app:** https://match-mind.streamlit.app  
 **API:** https://web-production-26b18.up.railway.app
