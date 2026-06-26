@@ -1289,6 +1289,33 @@ def get_team_tournament_form(team_name, exclude_match_id=None):
                     scorers.setdefault(assist, {"goals": 0, "assists": 0})
                     scorers[assist]["assists"] += 1
 
+    # Cross-check against _tournament_stats_cache (built from box scores).
+    # Box score goal counts are more reliable than event parsing — if the
+    # stats cache has a higher figure for any player, use it. This prevents
+    # stale or incomplete match_detail event lists from undercounting goals
+    # (e.g. when a match_detail was cached before Highlightly populated events).
+    for player_key, stats in _tournament_stats_cache["players"].items():
+        if not _names_match(stats.get("team", ""), team_name):
+            continue
+        cached_name = stats.get("name") or player_key
+        cached_goals = stats.get("goals", 0)
+        cached_assists = stats.get("assists", 0)
+
+        # Try to match to an existing entry by name
+        matched_key = None
+        for k in scorers:
+            if _names_match(k, cached_name):
+                matched_key = k
+                break
+
+        if matched_key:
+            # Take the higher value from either source
+            scorers[matched_key]["goals"] = max(scorers[matched_key]["goals"], cached_goals)
+            scorers[matched_key]["assists"] = max(scorers[matched_key]["assists"], cached_assists)
+        elif cached_goals > 0 or cached_assists > 0:
+            # Player appears in box scores but has no event entries — add them
+            scorers[cached_name] = {"goals": cached_goals, "assists": cached_assists}
+
     if not scorers:
         return None
 
@@ -1299,7 +1326,8 @@ def get_team_tournament_form(team_name, exclude_match_id=None):
             parts.append(f"{tally['goals']} goal(s)")
         if tally["assists"]:
             parts.append(f"{tally['assists']} assist(s)")
-        lines.append(f"  {player}: {', '.join(parts)}")
+        if parts:
+            lines.append(f"  {player}: {', '.join(parts)}")
 
     return "\n".join(lines)
 
